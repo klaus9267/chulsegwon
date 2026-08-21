@@ -81,3 +81,13 @@ cd web && npm install && npm run dev
 
 급행(9호선·1호선)을 모델에 넣지 않은 것과 2020년 역 데이터(신분당선 신논현
 연장 없음)가 남은 오차의 주된 출처다. 둘 다 KTDB GTFS 로 해결된다.
+
+## 이미지로 확인
+
+웹앱 없이 도달권을 SVG 로 뽑는다. "계산이 틀린 건지 화면이 틀린 건지"를 가를 때 쓴다.
+
+```bash
+./gradlew :builder:run --args="--mode render --gml data/raw/metro_graph.gml \
+  --from 강남 --at 08:40 --direction arrive --budget 40 --walk 15 \
+  --out data/out/reach.svg"
+```

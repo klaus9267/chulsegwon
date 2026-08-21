@@ -31,6 +31,21 @@ fun main(args: Array<String>) {
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
 
+    if (opts["--mode"] == "render") {
+        val tt = TimetableBuilder.synthesize(network)
+        Render.run(
+            network = network,
+            router = Router(network, tt),
+            originName = opts["--from"] ?: "강남",
+            atSec = parseHm(opts["--at"] ?: "08:40"),
+            arriveBy = (opts["--direction"] ?: "arrive") == "arrive",
+            budgetMinutes = (opts["--budget"] ?: "40").toInt(),
+            walkCapMinutes = (opts["--walk"] ?: "15").toInt(),
+            out = File(opts["--out"] ?: "data/out/reach.svg"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "compare") {
         val ref = File(opts["--reference"] ?: "tools/reference-kakao.json")
         require(ref.exists()) { "기준값 파일이 없다: ${ref.absolutePath}" }
