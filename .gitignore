@@ -9,3 +9,7 @@ dist/
 web/public/data/
 data/out/
 data/out-smoke/
+
+# 검증용 임시 다운로드
+web/*.bin
+web/idx*.html
