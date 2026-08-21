@@ -31,6 +31,14 @@ fun main(args: Array<String>) {
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
 
+    if (opts["--mode"] == "compare") {
+        val ref = File(opts["--reference"] ?: "tools/reference-kakao.json")
+        require(ref.exists()) { "기준값 파일이 없다: ${ref.absolutePath}" }
+        val tt = TimetableBuilder.synthesize(network)
+        Compare.run(network, Router(network, tt), ref)
+        return
+    }
+
     if (opts["--mode"] == "diag") {
         Diagnostics.lines(network)
         Diagnostics.transfers(network)

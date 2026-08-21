@@ -1,0 +1,26 @@
+{
+  "origin": "강남",
+  "departAt": "20:30",
+  "note": "카카오맵 지하철 경로, 평일 20:30 출발 기준. 브라우저에서 표본 18쌍 수집 (2026-08-21).",
+  "method": "문앞-문앞 = (승차시각 - 기준시각) + 승차시간. 카카오 대표숫자는 승차~하차만 세므로 대기를 더해야 우리 값과 같은 정의가 된다.",
+  "rows": [
+    { "to": "역삼",     "boardAt": "20:34", "rideMinutes": 1,  "stops": 1,  "transfer": "환승없음" },
+    { "to": "잠실",     "boardAt": "20:34", "rideMinutes": 11, "stops": 6,  "transfer": "환승없음" },
+    { "to": "서울역",   "boardAt": "20:31", "rideMinutes": 30, "stops": 11, "transfer": "환승1회" },
+    { "to": "홍대입구", "boardAt": "20:31", "rideMinutes": 39, "stops": 17, "transfer": "환승없음" },
+    { "to": "여의도",   "boardAt": "20:33", "rideMinutes": 24, "stops": 5,  "transfer": "환승1회" },
+    { "to": "건대입구", "boardAt": "20:33", "rideMinutes": 16, "stops": 7,  "transfer": "환승1회" },
+    { "to": "사당",     "boardAt": "20:31", "rideMinutes": 9,  "stops": 4,  "transfer": "환승없음" },
+    { "to": "신도림",   "boardAt": "20:31", "rideMinutes": 27, "stops": 12, "transfer": "환승없음" },
+    { "to": "왕십리",   "boardAt": "20:34", "rideMinutes": 22, "stops": 7,  "transfer": "환승1회" },
+    { "to": "노원",     "boardAt": "20:33", "rideMinutes": 41, "stops": 21, "transfer": "환승1회" },
+    { "to": "수원",     "boardAt": "20:32", "rideMinutes": 59, "stops": 20, "transfer": "환승1회" },
+    { "to": "인천",     "boardAt": "20:31", "rideMinutes": 81, "stops": 33, "transfer": "환승1회" },
+    { "to": "상봉",     "boardAt": "20:33", "rideMinutes": 28, "stops": 14, "transfer": "환승1회" },
+    { "to": "안산",     "boardAt": "20:31", "rideMinutes": 71, "stops": 24, "transfer": "환승1회" },
+    { "to": "의정부",   "boardAt": "20:33", "rideMinutes": 65, "stops": 27, "transfer": "환승2회" },
+    { "to": "판교",     "boardAt": "20:32", "rideMinutes": 13, "stops": 4,  "transfer": "환승없음" },
+    { "to": "부천",     "boardAt": "20:31", "rideMinutes": 50, "stops": 20, "transfer": "환승1회" },
+    { "to": "구로",     "boardAt": "20:31", "rideMinutes": 33, "stops": 13, "transfer": "환승1회" }
+  ]
+}

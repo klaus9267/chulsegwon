@@ -13,12 +13,14 @@ class ServicePeriod(val startSec: Int, val endSec: Int, val headwaySec: Int)
 object Headways {
     private fun hm(h: Int, m: Int) = h * 3600 + m * 60
 
+    // 20~23시를 7분으로 뒀다가 카카오맵 대조에서 첫 승차 대기가 일관되게 과하게 나와
+    // 5분으로 낮췄다. 표본에 맞춘 게 아니라 실제 저녁 배차(2호선 기준 4~5분)에 맞춘 것이다.
     val WEEKDAY = listOf(
         ServicePeriod(hm(5, 30), hm(7, 0), 6 * 60),
         ServicePeriod(hm(7, 0), hm(9, 0), 3 * 60),    // 출근 피크
         ServicePeriod(hm(9, 0), hm(17, 0), 6 * 60),
         ServicePeriod(hm(17, 0), hm(20, 0), 4 * 60),  // 퇴근 피크
-        ServicePeriod(hm(20, 0), hm(23, 0), 7 * 60),
+        ServicePeriod(hm(20, 0), hm(23, 0), 5 * 60),
         ServicePeriod(hm(23, 0), hm(24, 40), 10 * 60), // 막차
     )
 

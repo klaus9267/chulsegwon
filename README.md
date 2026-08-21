@@ -49,3 +49,35 @@ cd web && npm install && npm run dev
 
 - 역 그래프: [stripe2933/SeoulMetropolitanSubway](https://github.com/stripe2933/SeoulMetropolitanSubway) (MIT)
 - 배경지도: CARTO Positron / OpenStreetMap contributors
+
+## 검증
+
+카카오맵 지하철 경로와 대조했다. 전수(621×621)는 어느 서비스든 약관 위반이라
+표본으로 오차 분포만 본다.
+
+```bash
+./gradlew :builder:run --args="--mode compare --gml data/raw/metro_graph.gml --reference tools/reference-kakao.json"
+```
+
+강남 출발 · 평일 20:30 · 표본 18쌍 기준:
+
+| 지표 | 값 |
+|---|---|
+| 평균 오차(편향) | **-0.9분** |
+| 절대 평균 오차 | 3.8분 |
+| ±3분 이내 | 67% |
+| ±7분 이내 | 89% |
+
+비교는 **문앞-문앞**으로 한다. 카카오의 대표 숫자는 승차~하차만 세고 우리 값은
+대기를 포함하므로, 기준값을 `(승차시각 - 기준시각) + 승차시간`으로 환산해야
+같은 정의가 된다. 이걸 안 맞추면 우리가 항상 나쁘게 나온다.
+
+남은 이상치와 원인:
+
+| 구간 | 차이 | 원인 |
+|---|---|---|
+| 강남→노원 | +9분 | 2호선 장거리 우회. 7호선 직결 대안을 못 찾음 |
+| 강남→안산 | -12분 | 4호선 안산선 장구간 표정속도(50km/h) 과대 추정 |
+
+급행(9호선·1호선)을 모델에 넣지 않은 것과 2020년 역 데이터(신분당선 신논현
+연장 없음)가 남은 오차의 주된 출처다. 둘 다 KTDB GTFS 로 해결된다.
