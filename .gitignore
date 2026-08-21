@@ -1,0 +1,11 @@
+# 빌드 산출물
+.gradle/
+build/
+node_modules/
+dist/
+
+# 생성 데이터 — 월 1회 재생성되는 물건이라 git 히스토리에 들어가면 안 된다.
+# 바이너리는 델타 압축이 안 돼서 갱신할 때마다 전체 복사본이 영구히 쌓인다.
+web/public/data/
+data/out/
+data/out-smoke/

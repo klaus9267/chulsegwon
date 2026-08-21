@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script type="module" src="/@vite/client"></script>
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>출퇴근 도달권</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #14171a; --muted: #6b7480;
+    --line: #e3e6ea; --accent: #2b6cb0; --panel: rgba(255,255,255,.97);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151a; --fg:#e8eaed; --muted:#9aa3af; --line:#2a2f38; --panel:rgba(20,23,28,.97); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  #map { position:absolute; inset:0; }
+
+  #panel {
+    position:absolute; z-index:2; top:12px; left:12px; width:320px; max-width:calc(100vw - 24px);
+    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+    backdrop-filter:blur(8px); box-shadow:0 6px 24px rgba(0,0,0,.12);
+  }
+  h1 { margin:0 0 2px; font-size:15px; font-weight:650; letter-spacing:-.2px; }
+  .sub { margin:0 0 12px; font-size:11.5px; color:var(--muted); }
+  .row { margin-bottom:11px; }
+  label { display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; font-weight:550; }
+  input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+    background:var(--bg); color:var(--fg); font-size:14px; }
+  input[type=range] { width:100%; accent-color:var(--accent); margin:0; }
+  .val { float:right; color:var(--fg); font-variant-numeric:tabular-nums; font-weight:600; }
+  .seg { display:flex; gap:6px; }
+  .seg button { flex:1; padding:7px 4px; border:1px solid var(--line); border-radius:8px;
+    background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; font-weight:550; }
+  .seg button[aria-pressed=true] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #legend { display:flex; gap:0; margin-top:10px; border-radius:6px; overflow:hidden; height:8px; }
+  #legend i { flex:1; }
+  #legendLabels { display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted); margin-top:3px; }
+  #status { margin-top:10px; font-size:11.5px; color:var(--muted); min-height:1.4em; }
+  #warn { margin-top:8px; font-size:10.5px; color:#b45309; line-height:1.45; }
+  @media (prefers-color-scheme: dark) { #warn { color:#fbbf24; } }
+
+  @media (max-width: 640px) {
+    #panel { top:auto; bottom:0; left:0; width:100%; max-width:none;
+      border-radius:14px 14px 0 0; border-left:0; border-right:0; border-bottom:0;
+      max-height:62vh; overflow-y:auto; }
+  }
+</style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panel">
+    <h1>출퇴근 도달권</h1>
+    <p class="sub">직장을 고르면 그 시간 안에 닿는 곳이 칠해집니다.</p>
+
+    <div class="row">
+      <label for="origin">직장 역</label>
+      <input id="origin" type="text" list="stations" placeholder="예: 강남" autocomplete="off" />
+      <datalist id="stations"></datalist>
+    </div>
+
+    <div class="row">
+      <label>기준</label>
+      <div class="seg">
+        <button id="dirArrive" aria-pressed="true">출근 · 도착 기준</button>
+        <button id="dirDepart" aria-pressed="false">퇴근 · 출발 기준</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="time">시각 <span class="val" id="timeVal">08:40</span></label>
+      <input id="time" type="range" min="0" max="114" value="19" />
+    </div>
+
+    <div class="row">
+      <label for="budget">도달 시간 <span class="val" id="budgetVal">40분</span></label>
+      <input id="budget" type="range" min="10" max="120" step="5" value="40" />
+    </div>
+
+    <div class="row">
+      <label for="walk">역에서 도보 상한 <span class="val" id="walkVal">15분</span></label>
+      <input id="walk" type="range" min="0" max="25" value="15" />
+    </div>
+
+    <div id="legend"></div>
+    <div id="legendLabels"><span>가까움</span><span id="legendMax">40분</span></div>
+    <div id="status">불러오는 중…</div>
+    <div id="warn"></div>
+  </div>
+  <script type="module" src="/src/main.ts?t=1787309730302"></script>
+</body>
+</html>
