@@ -1,2 +1,2 @@
-rootProject.name = "transit-reach"
+rootProject.name = "homerange"
 include("builder")

@@ -1,4 +1,4 @@
-# transit-reach
+# homerange
 
 수도권 대중교통 **출퇴근 도달권(isochrone)** 으로 살 곳을 좁히는 도구.
 
