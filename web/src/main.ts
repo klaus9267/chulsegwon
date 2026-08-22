@@ -159,6 +159,12 @@ async function main() {
     void render();
   });
 
+  // 백그라운드 탭에서 열리면 MapLibre 가 렌더 루프를 못 돌려 레이어가 안 붙는다.
+  // 탭이 보이는 순간 다시 시도해야 사용자가 새로고침하지 않아도 살아난다.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void render();
+  });
+
   map.on("click", STATION_SOURCE, (e) => {
     const f = e.features?.[0];
     if (!f) return;
@@ -193,6 +199,19 @@ async function main() {
   }
 
   async function draw() {
+    // 레이어가 아직 안 붙었을 수 있다. 탭이 백그라운드면 MapLibre 가 렌더 루프를 안 돌려서
+    // 스타일 로딩이 끝나지 않고, addSource 가 계속 거부된다. 그 상태로 setData 를 부르면
+    // "Cannot read properties of undefined" 로 죽는다. 확인하고, 없으면 한 번 더 붙여본다.
+    if (!map.getSource(GRID_SOURCE) || !map.getSource(STATION_SOURCE)) {
+      await attachLayers(map, 3000);
+    }
+    const gridSource = map.getSource(GRID_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    const stationSource = map.getSource(STATION_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (!gridSource || !stationSource) {
+      stage("지도 레이어를 붙이지 못했습니다 (탭이 백그라운드면 생길 수 있습니다)");
+      return;
+    }
+
     const slots = state.direction === "ARRIVE_BY" ? arriveSlots : departSlots;
     const slot = slots[Math.min(state.timeIndex, slots.length - 1)];
 
@@ -210,10 +229,8 @@ async function main() {
       walkCapMinutes: state.walkCap,
       cellMeters: CELL_METERS,
     });
-    (map.getSource(GRID_SOURCE) as maplibregl.GeoJSONSource).setData(grid);
-    (map.getSource(STATION_SOURCE) as maplibregl.GeoJSONSource).setData(
-      buildStationGeoJSON(meta.stations, within),
-    );
+    gridSource.setData(grid);
+    stationSource.setData(buildStationGeoJSON(meta.stations, within));
 
     const ms = Math.round(performance.now() - t0);
     const verb = state.direction === "ARRIVE_BY" ? "까지 도착" : "에 출발";
