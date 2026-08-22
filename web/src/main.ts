@@ -70,6 +70,12 @@ async function main() {
     walkCap: 15,
   };
 
+  // 슬라이더를 끌면 입력이 쏟아진다. 그리는 중이면 마지막 요청 하나만 남긴다.
+  // 선언이 여기 있어야 한다. render() 는 함수 선언이라 호이스팅되지만 let 은 TDZ 라,
+  // 아래에 두면 첫 render() 호출이 "Cannot access 'rendering' before initialization" 으로 죽는다.
+  let rendering = false;
+  let queued = false;
+
   stage("지도 불러오는 중…");
   const loaded = await loadStyle();
 
@@ -81,6 +87,18 @@ async function main() {
     attributionControl: { compact: true },
   });
   const mapReady = map.once("load");
+  // 콘솔에서 지도 상태를 들여다볼 수 있게. id="map" 때문에 window.map 은 div 라 이름을 달리 쓴다.
+  (window as unknown as { reachMap: maplibregl.Map }).reachMap = map;
+
+  // MapLibre 는 스프라이트·폰트·타일 로드 실패를 error 이벤트로만 알린다. 안 듣고 있으면
+  // "스타일이 영영 안 끝난다"는 증상만 보이고 원인을 못 찾는다.
+  const mapErrors: string[] = [];
+  (window as unknown as { reachMapErrors: string[] }).reachMapErrors = mapErrors;
+  map.on("error", (e) => {
+    const msg = (e as { error?: Error }).error?.message ?? String(e);
+    mapErrors.push(msg);
+    console.warn("[map]", msg);
+  });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
 
@@ -157,9 +175,6 @@ async function main() {
     void render();
   }
 
-  // 슬라이더를 끌면 입력이 쏟아진다. 그리는 중이면 마지막 요청 하나만 남긴다.
-  let rendering = false;
-  let queued = false;
   async function render(): Promise<void> {
     if (rendering) {
       queued = true;
