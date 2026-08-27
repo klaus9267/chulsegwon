@@ -56,11 +56,66 @@ const FALLBACK_STYLE: maplibregl.StyleSpecification = {
  * 넘겨서, 멀쩡히 로딩 중이던 배경지도를 폴백으로 갈아치워 버렸다.
  * 스타일 JSON 을 받아보는 것으로 판단하면 그 경합이 아예 없다.
  */
+/**
+ * 라벨을 한글로 돌린다.
+ *
+ * CARTO 스타일은 줌 13 미만에서 {name_en} 을 쓴다. 우리 초기 줌이 10 근처라
+ * "SEOUL", "GOYANG", "INCHEON" 처럼 영문만 나왔다. 동네를 고르는 도구인데
+ * 지명이 영문이면 쓸모가 없다. {name} 은 OSM 의 현지 표기라 한국에선 한글이다.
+ */
+function koreanizeLabels(style: maplibregl.StyleSpecification): void {
+  const swap = (tf: unknown): unknown => {
+    if (typeof tf === "string") return tf.replace(/\{name_en\}/g, "{name}");
+    if (tf && typeof tf === "object" && "stops" in tf) {
+      const t = tf as { stops: Array<[number, unknown]> };
+      return { ...t, stops: t.stops.map(([z, v]) => [z, swap(v)] as [number, unknown]) };
+    }
+    return tf;
+  };
+  for (const layer of style.layers) {
+    if (layer.type !== "symbol") continue;
+    const layout = layer.layout as Record<string, unknown> | undefined;
+    if (!layout || layout["text-field"] === undefined) continue;
+    layout["text-field"] = swap(layout["text-field"]);
+  }
+}
+
+/**
+ * 브이월드(국토교통부) 배경지도. 한국 지도 디테일이 제대로 나온다.
+ *
+ * 카카오·네이버는 타일 엔드포인트가 아니라 자체 JS SDK 라 MapLibre 에 꽂을 수 없다.
+ * 국내 지도를 래스터 타일로 정식 제공하는 건 브이월드다. 무료지만 키가 필요해서,
+ * VITE_VWORLD_KEY 가 있을 때만 쓴다.
+ *
+ * ⚠️ 래스터라 심볼 레이어가 없다. 도달권 격자가 라벨 위에 얹히므로
+ * CARTO 를 쓸 때보다 지명이 덜 선명하다.
+ */
+function vworldStyle(key: string): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      vworld: {
+        type: "raster",
+        // 브이월드 WMTS 는 {z}/{y}/{x} 순서다. x,y 를 바꿔 쓰면 엉뚱한 타일이 온다.
+        tiles: ["https://api.vworld.kr/req/wmts/1.0.0/" + key + "/Base/{z}/{y}/{x}.png"],
+        tileSize: 256,
+        attribution: '<a href="https://www.vworld.kr/">VWorld</a>',
+      },
+    },
+    layers: [{ id: "vworld", type: "raster", source: "vworld" }],
+  };
+}
+
 async function loadStyle(): Promise<{ style: maplibregl.StyleSpecification; ok: boolean }> {
+  const vworldKey = import.meta.env.VITE_VWORLD_KEY as string | undefined;
+  if (vworldKey) return { style: vworldStyle(vworldKey), ok: true };
+
   try {
     const res = await fetch(BASEMAP, { signal: AbortSignal.timeout(12_000) });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    return { style: await res.json(), ok: true };
+    const style = (await res.json()) as maplibregl.StyleSpecification;
+    koreanizeLabels(style);
+    return { style, ok: true };
   } catch (e) {
     console.warn("배경지도 스타일 로드 실패, 폴백 사용:", e);
     return { style: FALLBACK_STYLE, ok: false };
