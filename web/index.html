@@ -34,6 +34,10 @@
   .seg button { flex:1; padding:7px 4px; border:1px solid var(--line); border-radius:8px;
     background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; font-weight:550; }
   .seg button[aria-pressed=true] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .run { width:100%; margin-top:2px; padding:11px 8px; border:0; border-radius:9px;
+    background:var(--accent); color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
+  .run:disabled { background:var(--line); color:var(--muted); cursor:default; }
+  .run:not(:disabled):active { transform:translateY(1px); }
   #legend { display:flex; gap:0; margin-top:10px; border-radius:6px; overflow:hidden; height:8px; }
   #legend i { flex:1; }
   #legendLabels { display:flex; justify-content:space-between; font-size:10.5px; color:var(--muted); margin-top:3px; }
@@ -52,7 +56,7 @@
   <div id="map"></div>
   <div id="panel">
     <h1>출퇴근 도달권</h1>
-    <p class="sub">직장을 고르면 그 시간 안에 닿는 곳이 칠해집니다.</p>
+    <p class="sub">직장 역과 시간을 정하고 아래 버튼을 누르세요.</p>
 
     <div class="row">
       <label for="origin">직장 역</label>
@@ -82,6 +86,8 @@
       <label for="walk">역에서 도보 상한 <span class="val" id="walkVal">15분</span></label>
       <input id="walk" type="range" min="0" max="25" value="15" />
     </div>
+
+    <button id="run" class="run">도달권 보기</button>
 
     <div id="legend"></div>
     <div id="legendLabels"><span>가까움</span><span id="legendMax">40분</span></div>

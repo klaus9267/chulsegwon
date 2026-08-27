@@ -11,6 +11,19 @@ const BASEMAP = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 /** 격자 한 칸 크기(m). 작을수록 곱지만 셀 수가 제곱으로 는다. */
 const CELL_METERS = 400;
 
+/** 처음 열었을 때 보일 범위. 서울 시가지가 들어와야 어디를 보고 있는지 안다. */
+const SEOUL_BOUNDS: [[number, number], [number, number]] = [
+  [126.76, 37.42],
+  [127.19, 37.70],
+];
+
+/** 패널이 지도를 가린다. 좁은 화면은 아래를, 넓은 화면은 왼쪽을 비워둔다. */
+function panelPadding() {
+  return window.innerWidth <= 640
+    ? { top: 24, right: 24, bottom: Math.round(window.innerHeight * 0.42), left: 24 }
+    : { top: 24, right: 24, bottom: 24, left: 340 };
+}
+
 /** 짧을수록 진하게. 격자는 칸마다 한 번만 그려지므로 겹쳐서 어두워지지 않는다. */
 const RAMP: Array<[number, string]> = [
   [0, "#12467f"],
@@ -75,6 +88,10 @@ async function main() {
   // 아래에 두면 첫 render() 호출이 "Cannot access 'rendering' before initialization" 으로 죽는다.
   let rendering = false;
   let queued = false;
+  /** 버튼을 누르기 전에는 아무것도 칠하지 않는다. */
+  let hasRun = false;
+  /** 첫 결과에만 화면을 맞춘다. 이후 슬라이더를 만질 때 지도가 튀면 성가시다. */
+  let fitted = false;
 
   stage("지도 불러오는 중…");
   const loaded = await loadStyle();
@@ -82,8 +99,8 @@ async function main() {
   const map = new maplibregl.Map({
     container: "map",
     style: loaded.style,
-    center: [meta.stations[state.origin].lon, meta.stations[state.origin].lat],
-    zoom: 10.2,
+    bounds: SEOUL_BOUNDS,
+    fitBoundsOptions: { padding: panelPadding() },
     attributionControl: { compact: true },
   });
   const mapReady = map.once("load");
@@ -130,39 +147,40 @@ async function main() {
     await attachLayers(map, 5000);
     $("warn").textContent = "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. " + $("warn").textContent;
   }
-  await render();
+  syncLabels();
+  stage("직장 역과 시간을 정하고 [도달권 보기]를 누르세요");
+
+  $("run").addEventListener("click", () => void run());
 
   $<HTMLInputElement>("origin").addEventListener("change", (e) => {
     const name = (e.target as HTMLInputElement).value.trim();
-    const found = findStation(meta, name);
-    if (found === null) {
-      stage(name + " 역을 찾을 수 없습니다");
+    if (name === "") return;
+    if (findStation(meta, name) === null) {
+      stage("'" + name + "' 역을 찾을 수 없습니다");
       return;
     }
-    state.origin = found;
-    map.easeTo({ center: [meta.stations[found].lon, meta.stations[found].lat] });
-    void render();
+    onInputChanged();
   });
 
   $("dirArrive").addEventListener("click", () => setDirection("ARRIVE_BY"));
   $("dirDepart").addEventListener("click", () => setDirection("DEPART_AT"));
   timeSlider.addEventListener("input", () => {
     state.timeIndex = +timeSlider.value;
-    void render();
+    onInputChanged();
   });
   $<HTMLInputElement>("budget").addEventListener("input", (e) => {
     state.budget = +(e.target as HTMLInputElement).value;
-    void render();
+    onInputChanged();
   });
   $<HTMLInputElement>("walk").addEventListener("input", (e) => {
     state.walkCap = +(e.target as HTMLInputElement).value;
-    void render();
+    onInputChanged();
   });
 
   // 백그라운드 탭에서 열리면 MapLibre 가 렌더 루프를 못 돌려 레이어가 안 붙는다.
   // 탭이 보이는 순간 다시 시도해야 사용자가 새로고침하지 않아도 살아난다.
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void render();
+    if (!document.hidden && hasRun) void render();
   });
 
   map.on("click", STATION_SOURCE, (e) => {
@@ -174,11 +192,44 @@ async function main() {
       .addTo(map);
   });
 
+  function currentSlot() {
+    const slots = state.direction === "ARRIVE_BY" ? arriveSlots : departSlots;
+    return slots[Math.min(state.timeIndex, slots.length - 1)];
+  }
+
+  /** 라벨은 칠하지 않아도 항상 최신이어야 한다. 슬라이더를 움직였는데 숫자가 안 바뀌면 고장으로 보인다. */
+  function syncLabels() {
+    const slot = currentSlot();
+    $("timeVal").textContent = slot.label.replace(/^(도착|출발) /, "");
+    $("budgetVal").textContent = state.budget + "분";
+    $("walkVal").textContent = state.walkCap === 0 ? "역만" : state.walkCap + "분";
+    $("legendMax").textContent = state.budget + "분";
+  }
+
+  function onInputChanged() {
+    syncLabels();
+    if (hasRun) void render();
+    else stage("[도달권 보기]를 누르면 계산합니다");
+  }
+
+  /** 버튼이 눌렸을 때만 계산이 시작된다. */
+  async function run() {
+    const name = $<HTMLInputElement>("origin").value.trim();
+    const found = findStation(meta, name);
+    if (found === null) {
+      stage("'" + name + "' 역을 찾을 수 없습니다");
+      return;
+    }
+    state.origin = found;
+    hasRun = true;
+    await render();
+  }
+
   function setDirection(d: Direction) {
     state.direction = d;
     $("dirArrive").setAttribute("aria-pressed", String(d === "ARRIVE_BY"));
     $("dirDepart").setAttribute("aria-pressed", String(d === "DEPART_AT"));
-    void render();
+    onInputChanged();
   }
 
   async function render(): Promise<void> {
@@ -212,13 +263,8 @@ async function main() {
       return;
     }
 
-    const slots = state.direction === "ARRIVE_BY" ? arriveSlots : departSlots;
-    const slot = slots[Math.min(state.timeIndex, slots.length - 1)];
-
-    $("timeVal").textContent = slot.label.replace(/^(도착|출발) /, "");
-    $("budgetVal").textContent = state.budget + "분";
-    $("walkVal").textContent = state.walkCap === 0 ? "역만" : state.walkCap + "분";
-    $("legendMax").textContent = state.budget + "분";
+    const slot = currentSlot();
+    syncLabels();
 
     const t0 = performance.now();
     const set = await provider.reachability(state.origin, slot.index);
@@ -231,6 +277,18 @@ async function main() {
     });
     gridSource.setData(grid);
     stationSource.setData(buildStationGeoJSON(meta.stations, within));
+
+    // 직장이 수원이면 서울 화면에는 결과가 거의 안 보인다. 첫 결과에 한 번만 맞춰준다.
+    if (!fitted && grid.features.length > 0) {
+      fitted = true;
+      const b = new maplibregl.LngLatBounds();
+      for (const f of grid.features) {
+        const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
+        b.extend(ring[0] as [number, number]);
+        b.extend(ring[2] as [number, number]);
+      }
+      map.fitBounds(b, { padding: panelPadding(), duration: 700 });
+    }
 
     const ms = Math.round(performance.now() - t0);
     const verb = state.direction === "ARRIVE_BY" ? "까지 도착" : "에 출발";
