@@ -1,6 +1,6 @@
 import isobands from "@turf/isobands";
 import type { Field } from "./grid";
-import { FIELD_UNREACHABLE } from "./grid";
+
 
 /**
  * 스칼라 필드에서 등시선(구간별 폴리곤)을 뽑는다.
@@ -50,7 +50,7 @@ export function buildIsobandsGeoJSON(field: Field, breaks: number[]): GeoJSON.Fe
     }
     // 도달 불가 구간이 섞여 들어오면 지도 전체가 덮인다.
     out.features = out.features.filter(
-      (f) => (f.properties as { minutes: number }).minutes < FIELD_UNREACHABLE,
+      (f) => (f.properties as { minutes: number }).minutes < field.unreachable,
     );
     return out;
   } catch (e) {
@@ -69,7 +69,6 @@ export function breaksFor(budgetMinutes: number, bandCount = 5): number[] {
   const step = budgetMinutes / bandCount;
   const out: number[] = [];
   for (let i = 0; i <= bandCount; i++) out.push(Math.round(i * step * 10) / 10);
-  // 마지막 경계는 예산보다 아주 조금 크게 둔다. 경계값과 정확히 같은 칸이 빠지지 않도록.
-  out[out.length - 1] = budgetMinutes + 0.01;
+  out[out.length - 1] = budgetMinutes;
   return out;
 }
