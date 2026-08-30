@@ -138,7 +138,10 @@ export class KakaoAdapter implements MapAdapter {
         );
         const polygon = new this.ns.maps.Polygon({
           path,
-          strokeWeight: 0,
+          // 채우기만으로는 인접한 색이 뭉개진다. 얇고 옅은 경계선으로 구간을 읽히게 한다.
+          strokeWeight: 1,
+          strokeColor: "#0f3d6e",
+          strokeOpacity: 0.3,
           fillColor: color,
           fillOpacity: 0.55,
         });

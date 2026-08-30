@@ -196,7 +196,9 @@ function installLayers(map: maplibregl.Map) {
   if (!map.getSource(STATION_SOURCE)) {
     map.addSource(STATION_SOURCE, { type: "geojson", data: EMPTY });
   }
-  if (map.getLayer("reach-fill") && map.getLayer(STATION_SOURCE)) return;
+  if (map.getLayer("reach-fill") && map.getLayer("reach-outline") && map.getLayer(STATION_SOURCE)) {
+    return;
+  }
 
   // 라벨 아래에 깔아야 동네 이름이 보인다. 어디가 어딘지 알아야 쓸모가 있다.
   const firstSymbol = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
@@ -210,6 +212,22 @@ function installLayers(map: maplibregl.Map) {
     },
     firstSymbol,
   );
+  // 구간 경계선. 채우기만으로는 인접한 색이 뭉개져 어디가 20분이고 30분인지 흐릿하다.
+  // 진한 남색을 얇고 옅게 얹으면 경계는 읽히면서 지도를 가리지 않는다.
+  map.addLayer(
+    {
+      id: "reach-outline",
+      type: "line",
+      source: BAND_SOURCE,
+      paint: {
+        "line-color": "#0f3d6e",
+        "line-opacity": 0.3,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.6, 14, 1.4],
+      },
+    },
+    firstSymbol,
+  );
+
   map.addLayer(
     {
       id: STATION_SOURCE,
