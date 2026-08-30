@@ -177,6 +177,8 @@ async function main() {
     fitBoundsOptions: { padding: panelPadding() },
     attributionControl: { compact: true },
   });
+  /** 고른 역을 지도에 찍는다. 계산 전에도 "여기가 그 역"인 걸 볼 수 있어야 한다. */
+  const originMarker = new maplibregl.Marker({ color: "#e53e3e" });
   const mapReady = map.once("load");
   // 콘솔에서 지도 상태를 들여다볼 수 있게. id="map" 때문에 window.map 은 div 라 이름을 달리 쓴다.
   (window as unknown as { reachMap: maplibregl.Map }).reachMap = map;
@@ -219,10 +221,12 @@ async function main() {
       const idx = displayToIndex.get(value);
       if (idx === undefined) return;
       state.origin = idx;
+      showOrigin(idx, true);
       onInputChanged();
     },
   });
   originInput.value = meta.stations[state.origin].name;
+  showOrigin(state.origin, false);
   $("legend").innerHTML = RAMP.map(([, c]) => '<i style="background:' + c + '"></i>').join("");
   $("warn").textContent =
     (loaded.ok ? "" : "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. ") + "⚠ " + meta.warning;
@@ -277,6 +281,20 @@ async function main() {
       .setHTML("<b>" + f.properties!.name + "</b><br>" + f.properties!.minutes + "분")
       .addTo(map);
   });
+
+  /**
+   * 고른 역을 마커로 찍는다. [move] 면 그쪽으로 카메라도 옮긴다.
+   *
+   * 처음 로드할 때는 옮기지 않는다. 서울 전체가 보이는 초기 뷰를 유지해야
+   * 어디를 보고 있는지 알 수 있다. 사용자가 직접 고른 순간에만 따라간다.
+   */
+  function showOrigin(index: number, move: boolean) {
+    const st = meta.stations[index];
+    originMarker.setLngLat([st.lon, st.lat]).addTo(map);
+    // 역이 바뀌면 도달 범위도 달라진다. 다음 계산에서 화면을 다시 맞춰야 한다.
+    fitted = false;
+    if (move) map.easeTo({ center: [st.lon, st.lat], zoom: 12, duration: 700 });
+  }
 
   function currentSlot() {
     const slots = state.direction === "ARRIVE_BY" ? arriveSlots : departSlots;
