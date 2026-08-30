@@ -31,6 +31,7 @@ interface KakaoBounds {
 interface KakaoMap {
   setBounds(b: KakaoBounds, ...padding: number[]): void;
   panTo(p: KakaoLatLng): void;
+  panBy(dx: number, dy: number): void;
   setLevel(level: number, opts?: { animate?: boolean }): void;
   addControl(c: object, pos: unknown): void;
   relayout(): void;
@@ -182,12 +183,29 @@ export class KakaoAdapter implements MapAdapter {
     this.originMarker.setMap(this.map);
   }
 
+  /**
+   * 패딩을 setBounds 에 그대로 넘기면 안 된다.
+   *
+   * 카카오는 줌 레벨이 정수라 딱 맞는 배율이 없으면 한 단계 밖으로 반올림한다.
+   * 여기에 왼쪽 패딩 340px(가로의 37%)까지 얹으면 한 단계를 통째로 더 잃어서,
+   * 서울 도달권을 보려는데 파주~평택이 나온다.
+   *
+   * 작은 여백으로 배율만 맞추고, 패널을 피하는 건 픽셀 단위 이동으로 처리한다.
+   * 배율 손실 없이 같은 결과가 나온다.
+   */
   fitBounds(bounds: Bounds, padding: Padding): void {
     const b = new this.ns.maps.LatLngBounds();
     b.extend(new this.ns.maps.LatLng(bounds.south, bounds.west));
     b.extend(new this.ns.maps.LatLng(bounds.north, bounds.east));
     if (b.isEmpty()) return;
-    this.map.setBounds(b, padding.top, padding.right, padding.bottom, padding.left);
+
+    const EDGE = 24;
+    this.map.setBounds(b, EDGE, EDGE, EDGE, EDGE);
+
+    // 내용이 오른쪽으로 가려면 지도 중심이 왼쪽으로 가야 한다(부호 반대).
+    const dx = -(padding.left - padding.right) / 2;
+    const dy = (padding.bottom - padding.top) / 2;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) this.map.panBy(dx, dy);
   }
 
   easeTo(at: LngLat, zoom: number): void {
