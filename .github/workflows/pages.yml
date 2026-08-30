@@ -1,0 +1,70 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 한 번에 하나만. 연속 push 때 뒤엣것이 이긴다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 생성 데이터(89.5MB)는 git 에 없다. 바이너리라 델타 압축이 안 돼서
+      # 월 1회 갱신마다 전체 복사본이 히스토리에 쌓이기 때문이다(ADR-8).
+      # 릴리스 자산은 히스토리에 안 들어가고 자산당 2GB 까지 된다.
+      - name: 도달권 데이터 내려받기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download data-latest \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'chulsegwon-data.tgz' \
+            --output /tmp/data.tgz --clobber
+          mkdir -p web/public
+          tar -xzf /tmp/data.tgz -C web/public
+          test -f web/public/data/manifest.json || { echo "manifest 없음"; exit 1; }
+          echo "matrix $(ls web/public/data/matrix | wc -l) 개 / $(du -sh web/public/data | cut -f1)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      # 프로젝트 사이트라 /<repo>/ 하위로 서빙된다. base 를 안 주면 자산이 404.
+      - run: npm run build -- --base=/${{ github.event.repository.name }}/
+        working-directory: web
+        env:
+          VITE_KAKAO_KEY: ${{ secrets.VITE_KAKAO_KEY }}
+
+      # Jekyll 이 _ 로 시작하는 파일을 걸러내지 않도록.
+      - run: touch web/dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

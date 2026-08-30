@@ -79,7 +79,9 @@ async function createMap(initial: Bounds): Promise<MapAdapter> {
 
 async function main() {
   stage("데이터 목록 불러오는 중…");
-  const provider = await StationMatrixProvider.load("/data");
+  // GitHub Pages 프로젝트 사이트는 /chulsegwon/ 하위로 서빙된다. 절대경로로 "/data" 를
+  // 부르면 배포판에서 404 가 난다. BASE_URL 은 dev 에서 "/", 빌드 시 --base 값이 된다.
+  const provider = await StationMatrixProvider.load(import.meta.env.BASE_URL + "data");
   const meta = provider.manifest();
 
   const arriveSlots = meta.slots.filter((s) => s.direction === "ARRIVE_BY");
