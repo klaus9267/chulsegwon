@@ -13,3 +13,7 @@ data/out-smoke/
 # 검증용 임시 다운로드
 web/*.bin
 web/idx*.html
+
+# 키는 커밋하지 않는다
+.env
+.env.local
