@@ -2,6 +2,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { StationMatrixProvider } from "./provider";
 import { buildGridGeoJSON, buildStationGeoJSON } from "./grid";
+import { createCombobox } from "./combobox";
 import type { Direction, Manifest } from "./types";
 
 const GRID_SOURCE = "reach";
@@ -33,6 +34,24 @@ const RAMP: Array<[number, string]> = [
   [45, "#aecfe4"],
   [60, "#d6e6f2"],
 ];
+
+/**
+ * GML 의 노선 코드를 사람이 읽는 이름으로.
+ *
+ * 원본 데이터가 "K", "B", "SH" 같은 코드로만 되어 있어 그대로 보여주면 무슨 노선인지
+ * 알 수 없다. 환승역 조합으로 대조해 확인했다 — 서울역(1,4,A,K)=공항철도·경의중앙,
+ * 김포공항(5,9,KP,A)=김포골드, 초지(4,B,SH)=수인분당·서해, 신설동(1,2,W)=우이신설.
+ */
+const LINE_NAMES: Record<string, string> = {
+  K: "경의중앙", B: "수인분당", G: "경춘", A: "공항철도", S: "신분당",
+  I: "인천1", I2: "인천2", U: "의정부", W: "우이신설", E: "용인에버라인",
+  KK: "경강", KP: "김포골드", SH: "서해",
+};
+
+function lineName(code: string): string {
+  if (LINE_NAMES[code]) return LINE_NAMES[code];
+  return /^\d+$/.test(code) ? code + "호선" : code;
+}
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -174,14 +193,36 @@ async function main() {
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
 
-  const datalist = $<HTMLDataListElement>("stations");
-  for (const s of [...meta.stations].sort((a, b) => a.name.localeCompare(b.name, "ko"))) {
-    const opt = document.createElement("option");
-    opt.value = s.name;
-    opt.label = s.lines.join(", ");
-    datalist.appendChild(opt);
-  }
-  $<HTMLInputElement>("origin").value = meta.stations[state.origin].name;
+  // 같은 이름의 다른 역이 있다(5호선 양평 vs 경의중앙선 양평, 약 53km 거리).
+  // 이름만 보여주면 어느 쪽을 고른 건지 알 수 없으므로 중복될 때만 노선을 붙인다.
+  const nameCount = new Map<string, number>();
+  for (const st of meta.stations) nameCount.set(st.name, (nameCount.get(st.name) ?? 0) + 1);
+
+  const displayToIndex = new Map<string, number>();
+  const comboOptions = [...meta.stations]
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"))
+    .map((st) => {
+      const value = (nameCount.get(st.name) ?? 0) > 1
+        ? st.name + " (" + lineName(st.lines[0]) + ")"
+        : st.name;
+      displayToIndex.set(value, st.index);
+      return { value, hint: st.lines.map(lineName).join(" · ") };
+    });
+
+  const originInput = $<HTMLInputElement>("origin");
+  createCombobox({
+    input: originInput,
+    toggle: $("originToggle"),
+    list: $("originList"),
+    options: comboOptions,
+    onSelect: (value) => {
+      const idx = displayToIndex.get(value);
+      if (idx === undefined) return;
+      state.origin = idx;
+      onInputChanged();
+    },
+  });
+  originInput.value = meta.stations[state.origin].name;
   $("legend").innerHTML = RAMP.map(([, c]) => '<i style="background:' + c + '"></i>').join("");
   $("warn").textContent =
     (loaded.ok ? "" : "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. ") + "⚠ " + meta.warning;
@@ -206,16 +247,6 @@ async function main() {
   stage("직장 역과 시간을 정하고 [도달권 보기]를 누르세요");
 
   $("run").addEventListener("click", () => void run());
-
-  $<HTMLInputElement>("origin").addEventListener("change", (e) => {
-    const name = (e.target as HTMLInputElement).value.trim();
-    if (name === "") return;
-    if (findStation(meta, name) === null) {
-      stage("'" + name + "' 역을 찾을 수 없습니다");
-      return;
-    }
-    onInputChanged();
-  });
 
   $("dirArrive").addEventListener("click", () => setDirection("ARRIVE_BY"));
   $("dirDepart").addEventListener("click", () => setDirection("DEPART_AT"));
@@ -268,9 +299,15 @@ async function main() {
   }
 
   /** 버튼이 눌렸을 때만 계산이 시작된다. */
+  /** 목록에서 고른 표시값이 먼저다. 직접 타이핑한 경우에는 이름으로 찾는다. */
+  function resolveOrigin(text: string): number | null {
+    const exact = displayToIndex.get(text.trim());
+    return exact !== undefined ? exact : findStation(meta, text);
+  }
+
   async function run() {
-    const name = $<HTMLInputElement>("origin").value.trim();
-    const found = findStation(meta, name);
+    const name = originInput.value.trim();
+    const found = resolveOrigin(name);
     if (found === null) {
       stage("'" + name + "' 역을 찾을 수 없습니다");
       return;

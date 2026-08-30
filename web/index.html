@@ -28,6 +28,20 @@
   label { display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; font-weight:550; }
   input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
     background:var(--bg); color:var(--fg); font-size:14px; }
+  .combo { position:relative; }
+  .combo input { padding-right:34px; }
+  .combo-toggle { position:absolute; top:0; right:0; width:32px; height:100%;
+    border:0; background:transparent; color:var(--muted); font-size:13px; cursor:pointer; line-height:1; }
+  .combo-list { position:absolute; z-index:5; top:calc(100% + 4px); left:0; right:0;
+    margin:0; padding:4px; list-style:none; max-height:240px; overflow-y:auto;
+    background:var(--bg); border:1px solid var(--line); border-radius:9px;
+    box-shadow:0 8px 24px rgba(0,0,0,.16); }
+  .combo-list li { padding:7px 9px; border-radius:6px; cursor:pointer; font-size:13.5px;
+    display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .combo-list li .hint { color:var(--muted); font-size:11px; flex-shrink:0; }
+  .combo-list li[aria-selected=true] { background:var(--accent); color:#fff; }
+  .combo-list li[aria-selected=true] .hint { color:rgba(255,255,255,.8); }
+  .combo-list .empty { color:var(--muted); cursor:default; justify-content:flex-start; }
   input[type=range] { width:100%; accent-color:var(--accent); margin:0; }
   .val { float:right; color:var(--fg); font-variant-numeric:tabular-nums; font-weight:600; }
   .seg { display:flex; gap:6px; }
@@ -60,8 +74,13 @@
 
     <div class="row">
       <label for="origin">직장 역</label>
-      <input id="origin" type="text" list="stations" placeholder="예: 강남" autocomplete="off" />
-      <datalist id="stations"></datalist>
+      <div class="combo">
+        <input id="origin" type="text" placeholder="역 이름 입력 또는 목록에서 선택"
+               autocomplete="off" role="combobox" aria-expanded="false"
+               aria-controls="originList" aria-autocomplete="list" />
+        <button id="originToggle" class="combo-toggle" type="button" aria-label="역 목록 열기">▾</button>
+        <ul id="originList" class="combo-list" role="listbox" hidden></ul>
+      </div>
     </div>
 
     <div class="row">
