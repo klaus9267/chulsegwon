@@ -1,2 +1,2 @@
-rootProject.name = "homerange"
+rootProject.name = "chulsegwon"
 include("builder")
