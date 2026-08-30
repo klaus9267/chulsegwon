@@ -137,7 +137,6 @@ async function main() {
   });
   originInput.value = meta.stations[state.origin].name;
 
-  $("legend").innerHTML = RAMP.map(([, c]) => '<i style="background:' + c + '"></i>').join("");
   const timeSlider = $<HTMLInputElement>("time");
   timeSlider.max = String(arriveSlots.length - 1);
   syncLabels();
@@ -197,6 +196,15 @@ async function main() {
     $("budgetVal").textContent = state.budget + "분";
     $("walkVal").textContent = state.walkCap === 0 ? "역만" : state.walkCap + "분";
     $("legendMax").textContent = state.budget + "분";
+
+    // 색이 무슨 뜻인지 숫자로 보여준다. "가까움 / 40분" 만으로는 각 색이 몇 분인지 알 수 없다.
+    // 구간 경계는 예산에 비례하므로 예산이 바뀌면 라벨도 같이 바뀌어야 한다.
+    const step = state.budget / RAMP.length;
+    $("legend").innerHTML = RAMP.map(
+      ([, color], i) =>
+        '<span class="band"><i style="background:' + color + '"></i><b>' +
+        Math.round(i * step) + "</b></span>",
+    ).join("");
   }
 
   function onInputChanged() {
