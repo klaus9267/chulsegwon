@@ -113,6 +113,13 @@ export class KakaoAdapter implements MapAdapter {
     });
     map.addControl(new ns.maps.ZoomControl(), ns.maps.ControlPosition.RIGHT);
     const adapter = new KakaoAdapter(ns, map);
+
+    // 컨테이너 크기가 잡히기 전에 setBounds 를 부르면 배율이 엉뚱하게 나온다
+    // (0 크기 기준으로 맞추려다 과하게 확대된다). 레이아웃을 한 번 갱신하고,
+    // 다음 프레임에 맞춘다.
+    map.relayout();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    map.relayout();
     adapter.fitBounds(initial, padding);
     return adapter;
   }

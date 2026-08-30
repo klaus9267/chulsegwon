@@ -167,7 +167,11 @@ async function main() {
   showOrigin(state.origin, false);
   $("warn").textContent =
     (map.basemapOk ? "" : "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. ") + "⚠ " + meta.warning;
-  stage("직장 역과 시간을 정하고 [도달권 보기]를 누르세요 · 배경지도 " + map.name);
+
+  // 빈 지도로 시작하면 이 도구가 뭘 하는지 안 보인다. 기본값(강남·08:40·40분)으로
+  // 한 번 그려두고, 그 뒤로는 슬라이더가 즉시 반영된다.
+  hasRun = true;
+  await render();
 
   /**
    * 고른 역을 마커로 찍는다. [move] 면 카메라도 옮긴다.
@@ -209,8 +213,7 @@ async function main() {
 
   function onInputChanged() {
     syncLabels();
-    if (hasRun) void render();
-    else stage("[도달권 보기]를 누르면 계산합니다");
+    void render();
   }
 
   function setDirection(d: Direction) {
