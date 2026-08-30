@@ -89,6 +89,8 @@ async function main() {
 
   const state = {
     origin: findStation(meta, "강남") ?? 0,
+    /** 맞벌이용 두 번째 직장. null 이면 한 명 기준. */
+    origin2: null as number | null,
     direction: "ARRIVE_BY" as Direction,
     timeIndex: 19,
     budget: 40,
@@ -131,11 +133,34 @@ async function main() {
       const idx = displayToIndex.get(value);
       if (idx === undefined) return;
       state.origin = idx;
-      showOrigin(idx, true);
+      showOrigins(idx);
       onInputChanged();
     },
   });
   originInput.value = meta.stations[state.origin].name;
+
+  const origin2Input = $<HTMLInputElement>("origin2");
+  createCombobox({
+    input: origin2Input,
+    toggle: $("origin2Toggle"),
+    list: $("origin2List"),
+    options: comboOptions,
+    onSelect: (value) => {
+      const idx = displayToIndex.get(value);
+      if (idx === undefined) return;
+      state.origin2 = idx;
+      $("origin2Clear").hidden = false;
+      showOrigins();
+      onInputChanged();
+    },
+  });
+  $("origin2Clear").addEventListener("click", () => {
+    state.origin2 = null;
+    origin2Input.value = "";
+    $("origin2Clear").hidden = true;
+    showOrigins();
+    onInputChanged();
+  });
 
   const timeSlider = $<HTMLInputElement>("time");
   timeSlider.max = String(arriveSlots.length - 1);
@@ -143,6 +168,17 @@ async function main() {
   stage("지도 불러오는 중…");
 
   $("run").addEventListener("click", () => void run());
+
+  // 매물은 우리가 갖지 않는다. 지역을 좁혀주는 게 우리 몫이고, 고른 뒤에는
+  // 이미 잘하는 곳으로 넘긴다. 크롤링이 아니라 링크라 저작권 문제도 없다.
+  $("handoff").addEventListener("click", () => {
+    if (!map) return;
+    const c = map.getCenter();
+    const url =
+      "https://new.land.naver.com/complexes?ms=" +
+      c.lat.toFixed(6) + "," + c.lon.toFixed(6) + ",15";
+    window.open(url, "_blank", "noopener");
+  });
   $("dirArrive").addEventListener("click", () => setDirection("ARRIVE_BY"));
   $("dirDepart").addEventListener("click", () => setDirection("DEPART_AT"));
   timeSlider.addEventListener("input", () => {
@@ -164,7 +200,7 @@ async function main() {
   });
 
   map = await createMap(SEOUL_BOUNDS);
-  showOrigin(state.origin, false);
+  showOrigins();
   $("warn").textContent =
     (map.basemapOk ? "" : "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. ") + "⚠ " + meta.warning;
 
@@ -179,13 +215,22 @@ async function main() {
    * 처음 로드할 때는 옮기지 않는다. 서울 전체가 보이는 초기 뷰를 유지해야
    * 어디를 보고 있는지 알 수 있다.
    */
-  function showOrigin(index: number, move: boolean) {
+  /**
+   * 출발역 마커를 다시 찍는다. 맞벌이면 둘이다.
+   *
+   * [moveTo] 를 주면 그 역으로 카메라도 옮긴다. 처음 로드할 때는 옮기지 않는다 —
+   * 서울 전체가 보이는 초기 뷰를 유지해야 어디를 보고 있는지 알 수 있다.
+   */
+  function showOrigins(moveTo?: number) {
     if (!map) return;
-    const st = meta.stations[index];
-    map.setOrigin({ lon: st.lon, lat: st.lat });
-    // 역이 바뀌면 도달 범위도 달라진다. 다음 계산에서 화면을 다시 맞춰야 한다.
+    const idxs = [state.origin, ...(state.origin2 === null ? [] : [state.origin2])];
+    map.setOrigins(idxs.map((i) => ({ lon: meta.stations[i].lon, lat: meta.stations[i].lat })));
+    // 출발지가 바뀌면 도달 범위도 달라진다. 다음 계산에서 화면을 다시 맞춰야 한다.
     fitted = false;
-    if (move) map.easeTo({ lon: st.lon, lat: st.lat }, 12);
+    if (moveTo !== undefined) {
+      const st = meta.stations[moveTo];
+      map.easeTo({ lon: st.lon, lat: st.lat }, 12);
+    }
   }
 
   function currentSlot() {
@@ -264,7 +309,25 @@ async function main() {
 
     const t0 = performance.now();
     const set = await provider.reachability(state.origin, slot.index);
-    const within = set.stationsWithin(state.budget);
+    let within = set.stationsWithin(state.budget);
+
+    // 맞벌이: 두 직장 모두에서 예산 안에 드는 역만 남긴다.
+    // 각 역의 값은 둘 중 **더 오래 걸리는 쪽**이다. 두 사람 다 그 시간 안에
+    // 닿아야 하므로 max 가 맞다. 행렬을 하나 더 읽고 배열을 훑는 게 전부라
+    // 라우팅을 다시 돌리는 것과 비교가 안 되게 싸다.
+    if (state.origin2 !== null) {
+      const set2 = await provider.reachability(state.origin2, slot.index);
+      const both: Array<[number, number]> = [];
+      for (const [i] of within) {
+        const b = set2.minutesToStation(i);
+        if (b === null) continue;
+        const a = set.minutesToStation(i);
+        if (a === null) continue;
+        const worst = Math.max(a, b);
+        if (worst <= state.budget) both.push([i, worst]);
+      }
+      within = both;
+    }
 
     const field = buildField(meta.stations, within, {
       budgetMinutes: state.budget,
@@ -298,8 +361,12 @@ async function main() {
 
     const ms = Math.round(performance.now() - t0);
     const verb = state.direction === "ARRIVE_BY" ? "까지 도착" : "에 출발";
+    const who =
+      state.origin2 === null
+        ? meta.stations[state.origin].name
+        : meta.stations[state.origin].name + " + " + meta.stations[state.origin2].name;
     stage(
-      meta.stations[state.origin].name + " " + slot.label.slice(3) + verb +
+      who + " " + slot.label.slice(3) + verb +
         " · 도달역 " + within.length + "개 · 등시선 " + bands.features.length + "구간 · " + ms + "ms",
     );
   }

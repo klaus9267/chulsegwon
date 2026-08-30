@@ -33,6 +33,7 @@ interface KakaoMap {
   panTo(p: KakaoLatLng): void;
   panBy(dx: number, dy: number): void;
   setLevel(level: number, opts?: { animate?: boolean }): void;
+  getCenter(): KakaoLatLng;
   addControl(c: object, pos: unknown): void;
   relayout(): void;
 }
@@ -91,7 +92,7 @@ export class KakaoAdapter implements MapAdapter {
 
   private bandOverlays: KakaoOverlay[] = [];
   private stationOverlays: KakaoOverlay[] = [];
-  private originMarker: KakaoOverlay | null = null;
+  private originMarkers: KakaoOverlay[] = [];
 
   private constructor(
     private readonly ns: KakaoNS,
@@ -186,11 +187,15 @@ export class KakaoAdapter implements MapAdapter {
     }
   }
 
-  setOrigin(at: LngLat): void {
-    const pos = new this.ns.maps.LatLng(at.lat, at.lon);
-    if (this.originMarker) this.originMarker.setMap(null);
-    this.originMarker = new this.ns.maps.Marker({ position: pos });
-    this.originMarker.setMap(this.map);
+  setOrigins(points: LngLat[]): void {
+    for (const m of this.originMarkers) m.setMap(null);
+    this.originMarkers = points.map((at) => {
+      const m = new this.ns.maps.Marker({
+        position: new this.ns.maps.LatLng(at.lat, at.lon),
+      });
+      m.setMap(this.map);
+      return m;
+    });
   }
 
   /**
@@ -221,5 +226,10 @@ export class KakaoAdapter implements MapAdapter {
   easeTo(at: LngLat, zoom: number): void {
     this.map.setLevel(zoomToLevel(zoom), { animate: true });
     this.map.panTo(new this.ns.maps.LatLng(at.lat, at.lon));
+  }
+
+  getCenter(): LngLat {
+    const c = this.map.getCenter();
+    return { lon: c.getLng(), lat: c.getLat() };
   }
 }

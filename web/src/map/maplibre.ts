@@ -80,10 +80,11 @@ async function loadStyle(): Promise<{ style: maplibregl.StyleSpecification; ok: 
 export class MapLibreAdapter implements MapAdapter {
   readonly name = "CARTO";
 
+  private originMarkers: maplibregl.Marker[] = [];
+
   private constructor(
     private readonly map: maplibregl.Map,
     readonly basemapOk: boolean,
-    private readonly originMarker: maplibregl.Marker,
   ) {}
 
   static async create(
@@ -121,7 +122,7 @@ export class MapLibreAdapter implements MapAdapter {
       await attachLayers(map, 5000);
       ok = false;
     }
-    return new MapLibreAdapter(map, ok, new maplibregl.Marker({ color: "#e53e3e" }));
+    return new MapLibreAdapter(map, ok);
   }
 
   setBands(bands: GeoJSON.FeatureCollection, ramp: Ramp, budgetMinutes: number): void {
@@ -142,8 +143,11 @@ export class MapLibreAdapter implements MapAdapter {
     src?.setData(stations);
   }
 
-  setOrigin(at: LngLat): void {
-    this.originMarker.setLngLat([at.lon, at.lat]).addTo(this.map);
+  setOrigins(points: LngLat[]): void {
+    for (const m of this.originMarkers) m.remove();
+    this.originMarkers = points.map((at) =>
+      new maplibregl.Marker({ color: "#e53e3e" }).setLngLat([at.lon, at.lat]).addTo(this.map),
+    );
   }
 
   fitBounds(bounds: Bounds, padding: Padding): void {
@@ -158,6 +162,11 @@ export class MapLibreAdapter implements MapAdapter {
 
   easeTo(at: LngLat, zoom: number): void {
     this.map.easeTo({ center: [at.lon, at.lat], zoom, duration: 700 });
+  }
+
+  getCenter(): LngLat {
+    const c = this.map.getCenter();
+    return { lon: c.lng, lat: c.lat };
   }
 
   /** 레이어가 붙었는지. 백그라운드 탭에서는 실패할 수 있어 호출부가 알아야 한다. */

@@ -34,12 +34,14 @@ export interface MapAdapter {
   setBands(bands: GeoJSON.FeatureCollection, ramp: Ramp, budgetMinutes: number): void;
   /** 도달 역 점. 구현에 따라 생략할 수 있다(카카오는 객체 수가 부담이라 상한을 둔다). */
   setStations(stations: GeoJSON.FeatureCollection): void;
-  /** 출발역 마커. */
-  setOrigin(at: LngLat): void;
+  /** 출발역 마커들. 맞벌이면 둘이다. */
+  setOrigins(points: LngLat[]): void;
   /** 지정 범위가 다 보이도록. */
   fitBounds(bounds: Bounds, padding: Padding): void;
   /** 한 점으로 부드럽게 이동. */
   easeTo(at: LngLat, zoom: number): void;
+  /** 지금 보고 있는 중심. 외부 서비스로 넘길 때 쓴다. */
+  getCenter(): LngLat;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */

@@ -28,6 +28,10 @@
   label { display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; font-weight:550; }
   input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
     background:var(--bg); color:var(--fg); font-size:14px; }
+  .rowhead { display:flex; justify-content:space-between; align-items:baseline; }
+  .linkbtn { border:0; background:none; padding:0; color:var(--accent); font-size:11px;
+    cursor:pointer; font-weight:600; }
+  .linkbtn[hidden] { display:none; }
   .combo { position:relative; }
   .combo input { padding-right:34px; }
   .combo-toggle { position:absolute; top:0; right:0; width:32px; height:100%;
@@ -52,6 +56,10 @@
     background:var(--accent); color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
   .run:disabled { background:var(--line); color:var(--muted); cursor:default; }
   .run:not(:disabled):active { transform:translateY(1px); }
+  .handoff { display:block; width:100%; margin-top:8px; padding:9px 8px; text-align:center;
+    border:1px solid var(--line); border-radius:9px; background:transparent;
+    color:var(--fg); font-size:12.5px; font-weight:550; cursor:pointer; text-decoration:none; }
+  .handoff:hover { border-color:var(--accent); color:var(--accent); }
   #legend { display:flex; gap:2px; margin-top:10px; }
   #legend .band { flex:1; text-align:center; }
   #legend .band i { display:block; height:8px; border-radius:2px; }
@@ -87,6 +95,20 @@
     </div>
 
     <div class="row">
+      <div class="rowhead">
+        <label for="origin2">직장 역 2 <span style="font-weight:400">· 맞벌이라면</span></label>
+        <button id="origin2Clear" class="linkbtn" type="button" hidden>지우기</button>
+      </div>
+      <div class="combo">
+        <input id="origin2" type="text" placeholder="비워두면 한 명 기준"
+               autocomplete="off" role="combobox" aria-expanded="false"
+               aria-controls="origin2List" aria-autocomplete="list" />
+        <button id="origin2Toggle" class="combo-toggle" type="button" aria-label="역 목록 열기">▾</button>
+        <ul id="origin2List" class="combo-list" role="listbox" hidden></ul>
+      </div>
+    </div>
+
+    <div class="row">
       <label>기준</label>
       <div class="seg">
         <button id="dirArrive" aria-pressed="true">출근 · 도착 기준</button>
@@ -110,6 +132,8 @@
     </div>
 
     <button id="run" class="run">다시 계산</button>
+
+    <button id="handoff" class="handoff" type="button">이 지역 매물 보기 → 네이버부동산</button>
 
     <div id="legend"></div>
     <div id="legendLabels">숫자는 <b id="legendMax">40분</b> 기준 구간 시작 (분)</div>
