@@ -2,37 +2,58 @@ import type { StationMeta } from "./types";
 
 /** 보행속도 4.5km/h. 직선거리 기준이라 실제 도보망보다 낙관적이다. */
 const WALK_MPS = 1.25;
-const UNSET = 255;
 
-export interface GridOptions {
+/**
+ * 도달 못 하는 칸의 값. 등시선을 뽑을 때 어떤 구간에도 안 걸리도록 크게 잡는다.
+ * 행렬 파일의 sentinel(255)과는 다른 값이라 이름을 구분한다.
+ */
+export const FIELD_UNREACHABLE = 9999;
+
+export interface FieldOptions {
   budgetMinutes: number;
   walkCapMinutes: number;
-  /** 격자 한 칸의 크기(m). 작을수록 곱지만 셀 수가 제곱으로 는다. */
+  /** 목표 칸 크기(m). 칸 수가 너무 많아지면 자동으로 키운다. */
+  cellMeters: number;
+  /** 이 칸 수를 넘지 않게 해상도를 낮춘다. 등시선 추출이 칸 수에 비례해 느려진다. */
+  maxCells?: number;
+}
+
+/**
+ * 각 격자점까지의 도달시간을 담은 스칼라 필드.
+ *
+ * 등시선은 이 필드에서 뽑는다. 격자를 그대로 그리면 칸이 사각형으로 보이고,
+ * 도보 반경이 칸보다 작으면(도보 4분=300m < 칸 400m) 역마다 사각형 하나씩
+ * 찍혀서 블록처럼 흩어진다.
+ */
+export interface Field {
+  /** rows*cols 개의 도달시간(분). 도달 불가는 [FIELD_UNREACHABLE]. */
+  values: Float32Array;
+  cols: number;
+  rows: number;
+  minLon: number;
+  minLat: number;
+  dLon: number;
+  dLat: number;
+  /** 실제로 쓰인 칸 크기(m). maxCells 때문에 요청값과 다를 수 있다. */
   cellMeters: number;
 }
 
 /**
- * 역마다 원을 그려 겹치는 방식은 색이 무너진다.
+ * 역에서 바깥으로 칠하는 scatter-min.
  *
- * fill-opacity 가 1 미만이면 겹친 곳이 계속 진해져서, 색이 "소요시간"이 아니라
- * "원이 몇 개 겹쳤나"를 나타내게 된다. 그렇다고 opacity 를 1 로 올리면 배경지도가
- * 가려진다.
- *
- * 격자로 바꾸면 이 문제가 사라진다. 칸마다 최솟값 하나만 남기므로 어떤 칸도 두 번
- * 그려지지 않는다. 반투명을 써도 겹침이 없고, 색이 소요시간과 정확히 대응한다.
- *
- * 계산은 역에서 바깥으로 칠하는 scatter-min 이라 싸다. 도보 상한이 15분이면
- * 역 하나가 덮는 칸이 수십 개뿐이라, 역 300개라도 만 번 남짓이면 끝난다.
+ * 칸마다 최솟값 하나만 남으므로 어떤 칸도 두 번 계산되지 않는다. 도보 상한이
+ * 15분이면 역 하나가 덮는 칸이 수십 개뿐이라, 역 300개라도 만 번 남짓이면 끝난다.
  */
-export function buildGridGeoJSON(
+export function buildField(
   stations: StationMeta[],
   within: Array<[number, number]>,
-  opts: GridOptions,
-): GeoJSON.FeatureCollection {
-  const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
-  if (within.length === 0) return empty;
+  opts: FieldOptions,
+): Field | null {
+  if (within.length === 0) return null;
 
-  const padMeters = opts.walkCapMinutes * 60 * WALK_MPS;
+  const maxCells = opts.maxCells ?? 160_000;
+  const padMeters = Math.max(opts.walkCapMinutes, 1) * 60 * WALK_MPS;
+
   const lats = within.map(([i]) => stations[i].lat);
   const lons = within.map(([i]) => stations[i].lon);
   const midLat = (Math.min(...lats) + Math.max(...lats)) / 2;
@@ -40,20 +61,26 @@ export function buildGridGeoJSON(
   const mPerLat = 111_320;
   const mPerLon = 111_320 * Math.cos((midLat * Math.PI) / 180);
 
-  const padLat = padMeters / mPerLat;
-  const padLon = padMeters / mPerLon;
-  const minLat = Math.min(...lats) - padLat;
-  const maxLat = Math.max(...lats) + padLat;
-  const minLon = Math.min(...lons) - padLon;
-  const maxLon = Math.max(...lons) + padLon;
+  const minLat = Math.min(...lats) - padMeters / mPerLat;
+  const maxLat = Math.max(...lats) + padMeters / mPerLat;
+  const minLon = Math.min(...lons) - padMeters / mPerLon;
+  const maxLon = Math.max(...lons) + padMeters / mPerLon;
 
-  const dLat = opts.cellMeters / mPerLat;
-  const dLon = opts.cellMeters / mPerLon;
-  const rows = Math.ceil((maxLat - minLat) / dLat);
-  const cols = Math.ceil((maxLon - minLon) / dLon);
-  if (rows <= 0 || cols <= 0 || rows * cols > 4_000_000) return empty;
+  // 요청한 해상도로 칸이 너무 많아지면 키운다. 등시선 추출 비용이 칸 수에 비례한다.
+  let cellMeters = opts.cellMeters;
+  for (let guard = 0; guard < 8; guard++) {
+    const c = Math.ceil(((maxLon - minLon) * mPerLon) / cellMeters);
+    const r = Math.ceil(((maxLat - minLat) * mPerLat) / cellMeters);
+    if (c * r <= maxCells) break;
+    cellMeters *= 1.5;
+  }
 
-  const best = new Uint8Array(rows * cols).fill(UNSET);
+  const dLat = cellMeters / mPerLat;
+  const dLon = cellMeters / mPerLon;
+  const cols = Math.ceil((maxLon - minLon) / dLon) + 1;
+  const rows = Math.ceil((maxLat - minLat) / dLat) + 1;
+
+  const values = new Float32Array(rows * cols).fill(FIELD_UNREACHABLE);
 
   for (const [stationIndex, minutes] of within) {
     const st = stations[stationIndex];
@@ -61,21 +88,19 @@ export function buildGridGeoJSON(
     if (allowance < 0) continue;
     const radius = allowance * 60 * WALK_MPS;
 
-    const cr = Math.ceil(radius / opts.cellMeters);
+    const cr = Math.ceil(radius / cellMeters) + 1;
     const r0 = Math.round((st.lat - minLat) / dLat);
     const c0 = Math.round((st.lon - minLon) / dLon);
 
     for (let dr = -cr; dr <= cr; dr++) {
       const r = r0 + dr;
       if (r < 0 || r >= rows) continue;
-      const cellLat = minLat + (r + 0.5) * dLat;
-      const dy = (cellLat - st.lat) * mPerLat;
+      const dy = (minLat + r * dLat - st.lat) * mPerLat;
 
       for (let dc = -cr; dc <= cr; dc++) {
         const c = c0 + dc;
         if (c < 0 || c >= cols) continue;
-        const cellLon = minLon + (c + 0.5) * dLon;
-        const dx = (cellLon - st.lon) * mPerLon;
+        const dx = (minLon + c * dLon - st.lon) * mPerLon;
 
         const dist = Math.hypot(dx, dy);
         if (dist > radius) continue;
@@ -83,36 +108,16 @@ export function buildGridGeoJSON(
         const total = minutes + dist / WALK_MPS / 60;
         if (total > opts.budgetMinutes) continue;
 
-        const v = Math.round(total);
         const idx = r * cols + c;
-        if (v < best[idx]) best[idx] = v;
+        if (total < values[idx]) values[idx] = total;
       }
     }
   }
 
-  const features: GeoJSON.Feature[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const v = best[r * cols + c];
-      if (v === UNSET) continue;
-      const la = minLat + r * dLat;
-      const lo = minLon + c * dLon;
-      features.push({
-        type: "Feature",
-        properties: { minutes: v },
-        geometry: {
-          type: "Polygon",
-          coordinates: [[
-            [lo, la], [lo + dLon, la], [lo + dLon, la + dLat], [lo, la + dLat], [lo, la],
-          ]],
-        },
-      });
-    }
-  }
-  return { type: "FeatureCollection", features };
+  return { values, cols, rows, minLon, minLat, dLon, dLat, cellMeters };
 }
 
-/** 도달 역 자체를 점으로. 격자만으로는 어디가 역인지 안 보인다. */
+/** 도달 역 자체를 점으로. 등시선만으로는 어디가 역인지 안 보인다. */
 export function buildStationGeoJSON(
   stations: StationMeta[],
   within: Array<[number, number]>,

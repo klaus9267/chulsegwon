@@ -1,7 +1,8 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { StationMatrixProvider } from "./provider";
-import { buildGridGeoJSON, buildStationGeoJSON } from "./grid";
+import { buildField, buildStationGeoJSON } from "./grid";
+import { buildIsobandsGeoJSON, breaksFor } from "./contour";
 import { createCombobox } from "./combobox";
 import type { Direction, Manifest } from "./types";
 
@@ -9,8 +10,14 @@ const GRID_SOURCE = "reach";
 const STATION_SOURCE = "reach-stations";
 const BASEMAP = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
-/** 격자 한 칸 크기(m). 작을수록 곱지만 셀 수가 제곱으로 는다. */
-const CELL_METERS = 400;
+/**
+ * 등시선을 뽑을 격자 해상도(m).
+ *
+ * 400m 로 두면 도보 4분(반경 300m)일 때 역마다 칸 하나만 걸려 블록처럼 흩어진다.
+ * 200m 면 같은 반경이 세 칸을 덮어 보간이 먹는다. 칸이 너무 많아지면
+ * buildField 가 알아서 키운다.
+ */
+const CELL_METERS = 200;
 
 /** 처음 열었을 때 보일 범위. 서울 시가지가 들어와야 어디를 보고 있는지 안다. */
 const SEOUL_BOUNDS: [[number, number], [number, number]] = [
@@ -380,31 +387,44 @@ async function main() {
     const set = await provider.reachability(state.origin, slot.index);
     const within = set.stationsWithin(state.budget);
 
-    const grid = buildGridGeoJSON(meta.stations, within, {
+    const field = buildField(meta.stations, within, {
       budgetMinutes: state.budget,
       walkCapMinutes: state.walkCap,
       cellMeters: CELL_METERS,
     });
-    gridSource.setData(grid);
+    const breaks = breaksFor(state.budget, RAMP.length);
+    const bands = field
+      ? buildIsobandsGeoJSON(field, breaks)
+      : ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection);
+
+    // 예산이 바뀌면 구간 경계도 같이 움직인다. 색을 예산에 비례해 다시 건다.
+    map.setPaintProperty("reach-fill", "fill-color", [
+      "interpolate",
+      ["linear"],
+      ["get", "minutes"],
+      ...RAMP.flatMap(([, color], i) => [(state.budget * i) / (RAMP.length - 1), color]),
+    ] as maplibregl.DataDrivenPropertyValueSpecification<string>);
+
+    gridSource.setData(bands);
     stationSource.setData(buildStationGeoJSON(meta.stations, within));
 
     // 직장이 수원이면 서울 화면에는 결과가 거의 안 보인다. 첫 결과에 한 번만 맞춰준다.
-    if (!fitted && grid.features.length > 0) {
+    if (!fitted && field) {
       fitted = true;
-      const b = new maplibregl.LngLatBounds();
-      for (const f of grid.features) {
-        const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
-        b.extend(ring[0] as [number, number]);
-        b.extend(ring[2] as [number, number]);
-      }
-      map.fitBounds(b, { padding: panelPadding(), duration: 700 });
+      map.fitBounds(
+        [
+          [field.minLon, field.minLat],
+          [field.minLon + field.cols * field.dLon, field.minLat + field.rows * field.dLat],
+        ],
+        { padding: panelPadding(), duration: 700 },
+      );
     }
 
     const ms = Math.round(performance.now() - t0);
     const verb = state.direction === "ARRIVE_BY" ? "까지 도착" : "에 출발";
     stage(
       meta.stations[state.origin].name + " " + slot.label.slice(3) + verb +
-      " · 도달역 " + within.length + "개 · 칸 " + grid.features.length + "개 · " + ms + "ms",
+      " · 도달역 " + within.length + "개 · 등시선 " + bands.features.length + "구간 · " + ms + "ms",
     );
   }
 }
@@ -459,14 +479,9 @@ function installLayers(map: maplibregl.Map) {
       type: "fill",
       source: GRID_SOURCE,
       paint: {
-        // 격자는 칸당 한 번만 그려지므로 반투명이어도 겹쳐서 어두워지지 않는다.
-        "fill-opacity": 0.6,
-        "fill-color": [
-          "step",
-          ["get", "minutes"],
-          RAMP[0][1],
-          ...RAMP.slice(1).flatMap(([m, c]) => [m, c]),
-        ] as maplibregl.DataDrivenPropertyValueSpecification<string>,
+        // 등시선은 구간이 도넛처럼 겹치지 않게 잘려 나오므로 반투명이어도 색이 안 무너진다.
+        "fill-opacity": 0.62,
+        "fill-color": "#4a90c4",
       },
     },
     firstSymbol,
