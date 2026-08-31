@@ -75,6 +75,15 @@
     opacity:0; pointer-events:none; transition:opacity .12s ease; }
   .kdot:hover::after { opacity:1; }
 
+  .cdot { width:7px; height:7px; border-radius:50%; background:#e07b39;
+    border:1px solid #fff; box-sizing:border-box; position:relative; cursor:default; }
+  .cdot::after { content:attr(data-name); position:absolute; left:50%; top:11px;
+    transform:translateX(-50%); white-space:nowrap; font-size:10.5px; font-weight:600;
+    color:#8a4a12; background:rgba(255,255,255,.94); padding:1px 5px; border-radius:4px;
+    opacity:0; pointer-events:none; }
+  .cdot:hover { transform:scale(1.6); z-index:8; }
+  .cdot:hover::after { opacity:1; }
+
   #legend { display:flex; gap:2px; margin-top:10px; }
   #legend .band { flex:1; text-align:center; }
   #legend .band i { display:block; height:8px; border-radius:2px; }
@@ -147,6 +156,11 @@
     </div>
 
     <button id="run" class="run">다시 계산</button>
+
+    <div class="row">
+      <label for="jeonse">전세 상한 <span class="val" id="jeonseVal">제한 없음</span></label>
+      <input id="jeonse" type="range" min="0" max="15" step="1" value="0" />
+    </div>
 
     <button id="handoff" class="handoff" type="button">이 지역 매물 보기 → 네이버부동산</button>
 

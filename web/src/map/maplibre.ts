@@ -4,6 +4,7 @@ import type { Bounds, LngLat, MapAdapter, Padding, Ramp } from "./adapter";
 
 const BAND_SOURCE = "reach";
 const STATION_SOURCE = "reach-stations";
+const COMPLEX_SOURCE = "reach-complexes";
 const CARTO = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -143,6 +144,11 @@ export class MapLibreAdapter implements MapAdapter {
     src?.setData(stations);
   }
 
+  setComplexes(complexes: GeoJSON.FeatureCollection): void {
+    const src = this.map.getSource(COMPLEX_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    src?.setData(complexes);
+  }
+
   setOrigins(points: LngLat[]): void {
     for (const m of this.originMarkers) m.remove();
     this.originMarkers = points.map((at) =>
@@ -218,6 +224,9 @@ function installLayers(map: maplibregl.Map) {
   if (!map.getSource(STATION_SOURCE)) {
     map.addSource(STATION_SOURCE, { type: "geojson", data: EMPTY });
   }
+  if (!map.getSource(COMPLEX_SOURCE)) {
+    map.addSource(COMPLEX_SOURCE, { type: "geojson", data: EMPTY });
+  }
   if (map.getLayer("reach-fill") && map.getLayer("reach-outline") && map.getLayer(STATION_SOURCE)) {
     return;
   }
@@ -279,6 +288,23 @@ function installLayers(map: maplibregl.Map) {
       paint: {
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 0.9, 12, 1.6, 15, 2.4],
         "circle-color": "#ffffff",
+      },
+    },
+    firstSymbol,
+  );
+
+  // 단지는 역보다 훨씬 많아 작게. 역(남색)과 구분되도록 다른 색을 쓴다.
+  map.addLayer(
+    {
+      id: COMPLEX_SOURCE,
+      type: "circle",
+      source: COMPLEX_SOURCE,
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 1.6, 13, 3, 16, 5],
+        "circle-color": "#e07b39",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 0.8,
+        "circle-opacity": 0.85,
       },
     },
     firstSymbol,

@@ -44,6 +44,8 @@ export interface MapAdapter {
   getCenter(): LngLat;
   /** 역을 클릭했을 때. 지도에서 바로 직장역을 바꾸기 위한 것. */
   onStationClick(handler: (stationIndex: number) => void): void;
+  /** 도달권 안 아파트 단지. 없으면 빈 컬렉션을 준다. */
+  setComplexes(complexes: GeoJSON.FeatureCollection): void;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */

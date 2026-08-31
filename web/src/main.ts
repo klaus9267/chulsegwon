@@ -2,6 +2,8 @@ import { StationMatrixProvider } from "./provider";
 import { buildField, buildStationGeoJSON } from "./grid";
 import { buildIsobandsGeoJSON, breaksFor } from "./contour";
 import { createCombobox } from "./combobox";
+import { buildComplexGeoJSON, filterComplexes, formatManwon, loadComplexes } from "./complexes";
+import type { ComplexMeta } from "./complexes";
 import type { Bounds, MapAdapter, Ramp } from "./map/adapter";
 import { MapLibreAdapter } from "./map/maplibre";
 import { KakaoAdapter } from "./map/kakao";
@@ -95,7 +97,16 @@ async function main() {
     timeIndex: 19,
     budget: 40,
     walkCap: 15,
+    /** 전세 상한(만원). 0 이면 제한 없음. */
+    maxJeonse: 0,
   };
+
+  // 단지 데이터는 부가 기능이다. 없어도 도달권은 그대로 동작해야 한다.
+  let complexes: ComplexMeta[] = [];
+  void loadComplexes(import.meta.env.BASE_URL + "data/").then((list) => {
+    complexes = list;
+    if (list.length > 0) void render();
+  });
 
   // 슬라이더를 끌면 입력이 쏟아진다. 그리는 중이면 마지막 요청 하나만 남긴다.
   // 선언이 여기 있어야 한다. render() 는 호이스팅되지만 let 은 TDZ 라, 아래에 두면
@@ -198,6 +209,11 @@ async function main() {
     state.walkCap = +(e.target as HTMLInputElement).value;
     onInputChanged();
   });
+  $<HTMLInputElement>("jeonse").addEventListener("input", (e) => {
+    // 슬라이더는 억 단위, 내부는 만원 단위.
+    state.maxJeonse = +(e.target as HTMLInputElement).value * 10000;
+    onInputChanged();
+  });
 
   // 백그라운드 탭에서 열리면 지도가 렌더 루프를 못 돌려 레이어가 안 붙는다.
   document.addEventListener("visibilitychange", () => {
@@ -260,6 +276,8 @@ async function main() {
     $("budgetVal").textContent = state.budget + "분";
     $("walkVal").textContent = state.walkCap === 0 ? "역만" : state.walkCap + "분";
     $("legendMax").textContent = state.budget + "분";
+    $("jeonseVal").textContent =
+      state.maxJeonse === 0 ? "제한 없음" : state.maxJeonse / 10000 + "억 이하";
 
     // 색이 무슨 뜻인지 숫자로 보여준다. "가까움 / 40분" 만으로는 각 색이 몇 분인지 알 수 없다.
     // 구간 경계는 예산에 비례하므로 예산이 바뀌면 라벨도 같이 바뀌어야 한다.
@@ -360,6 +378,15 @@ async function main() {
     map.setBands(bands, RAMP, state.budget);
     map.setStations(buildStationGeoJSON(meta.stations, within));
 
+    // 도달권 안 + 예산 이내 단지. 폴리곤 검사 없이 스칼라 필드를 찍어보면 O(1) 이다.
+    const picked = field
+      ? filterComplexes(complexes, field, {
+          maxJeonseManwon: state.maxJeonse,
+          budgetMinutes: state.budget,
+        })
+      : [];
+    map.setComplexes(buildComplexGeoJSON(picked));
+
     // 직장이 수원이면 서울 화면에는 결과가 거의 안 보인다. 첫 결과에 한 번만 맞춰준다.
     if (!fitted && field) {
       fitted = true;
@@ -380,9 +407,14 @@ async function main() {
       state.origin2 === null
         ? meta.stations[state.origin].name
         : meta.stations[state.origin].name + " + " + meta.stations[state.origin2].name;
+    const complexPart =
+      complexes.length === 0
+        ? ""
+        : " · 단지 " + picked.length + "곳" +
+          (state.maxJeonse > 0 ? "(전세 " + formatManwon(state.maxJeonse) + " 이하)" : "");
     stage(
       who + " " + slot.label.slice(3) + verb +
-        " · 도달역 " + within.length + "개 · 등시선 " + bands.features.length + "구간 · " + ms + "ms",
+        " · 도달역 " + within.length + "개" + complexPart + " · " + ms + "ms",
     );
   }
 }

@@ -94,6 +94,7 @@ export class KakaoAdapter implements MapAdapter {
   private bandOverlays: KakaoOverlay[] = [];
   private stationOverlays: KakaoOverlay[] = [];
   private stationClick: ((index: number) => void) | null = null;
+  private complexOverlays: KakaoOverlay[] = [];
   private originMarkers: KakaoOverlay[] = [];
 
   private constructor(
@@ -203,6 +204,32 @@ export class KakaoAdapter implements MapAdapter {
 
   onStationClick(handler: (stationIndex: number) => void): void {
     this.stationClick = handler;
+  }
+
+  /**
+   * 단지 점. 역보다 훨씬 많으므로 더 작고 가볍게 그린다.
+   * DOM 오버레이라 개수 상한이 필요하다 — 거래가 많은 순으로 잘린다.
+   */
+  setComplexes(complexes: GeoJSON.FeatureCollection): void {
+    for (const o of this.complexOverlays) o.setMap(null);
+    this.complexOverlays = [];
+    const MAX = 400;
+    for (const f of complexes.features.slice(0, MAX)) {
+      const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;
+      const p = f.properties as { name: string; jeonse: number | null };
+      const el = document.createElement("div");
+      el.className = "cdot";
+      el.dataset.name = p.name + (p.jeonse ? " · 전세 " + (p.jeonse / 10000).toFixed(1) + "억" : "");
+      const overlay = new this.ns.maps.CustomOverlay({
+        position: new this.ns.maps.LatLng(lat, lon),
+        content: el,
+        xAnchor: 0.5,
+        yAnchor: 0.5,
+        zIndex: 2,
+      });
+      overlay.setMap(this.map);
+      this.complexOverlays.push(overlay);
+    }
   }
 
   setOrigins(points: LngLat[]): void {

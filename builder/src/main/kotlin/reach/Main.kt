@@ -22,6 +22,22 @@ fun main(args: Array<String>) {
     val transferOverhead = (opts["--transfer-overhead-sec"] ?: "90").toInt()
     val originLimit = (opts["--origins"] ?: "0").toInt()   // 0 = 전부. 실측용.
 
+    if (opts["--mode"] == "geocode") {
+        // 카카오 REST 키. 프론트 번들에 들어가면 안 되므로 VITE_ 를 쓰지 않는다.
+        val kakao = System.getenv("KAKAO_REST_KEY")
+            ?: File(".env").takeIf { it.exists() }?.readLines()
+                ?.firstOrNull { it.startsWith("KAKAO_REST_KEY=") }?.substringAfter("=")
+            ?: error("KAKAO_REST_KEY 가 없다 (.env 또는 환경변수)")
+        Geocode.run(
+            key = kakao.trim(),
+            inFile = File(opts["--in"] ?: "data/raw/deals/complexes-raw.json"),
+            outFile = File(opts["--out"] ?: "web/public/data/complexes.json"),
+            cacheFile = File(opts["--cache"] ?: "data/raw/deals/geocode-cache.json"),
+            limit = (opts["--limit"] ?: "0").toInt(),
+        )
+        return
+    }
+
     if (opts["--mode"] == "deals") {
         // 키는 인자로 받지 않는다. 셸 히스토리와 프로세스 목록에 남기 때문이다.
         val key = System.getenv("DATA_GO_KR_KEY")
