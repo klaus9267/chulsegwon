@@ -762,15 +762,7 @@ async function main() {
     // 직장이 수원이면 서울 화면에는 결과가 거의 안 보인다. 첫 결과에 한 번만 맞춰준다.
     if (!fitted && field) {
       fitted = true;
-      map.fitBounds(
-        {
-          west: field.minLon,
-          south: field.minLat,
-          east: field.minLon + field.cols * field.dLon,
-          north: field.minLat + field.rows * field.dLat,
-        },
-        panelPadding(),
-      );
+      map.fitBounds(coreBounds(meta, within, state.walkCap), panelPadding());
     }
 
     const ms = Math.round(performance.now() - t0);
@@ -810,6 +802,47 @@ async function main() {
     // 화면 어딘가가 반응하지 않으면 멈춘 것처럼 보인다.
     bump("budgetVal");
   }
+}
+
+/**
+ * 화면을 맞출 범위.
+ *
+ * 도달 격자 전체에 맞추면 **가장 먼 역 하나가 배율을 정한다.** 45분이면 경춘선
+ * 끝자락 한 역이 잡히는데, 그것 때문에 서울 도심이 화면의 1/5 로 줄어든다.
+ * 세로로 긴 휴대폰에서는 더 심하다 — 가로를 맞추느라 세로가 두 배로 벌어져서
+ * 개성부터 천안까지 나온다.
+ *
+ * 그래서 도달 역의 5~95 분위 범위에 맞춘다. 바깥 10%를 잘라내면 대부분의 답이
+ * 있는 곳이 화면을 채우고, 잘린 부분도 조금만 밀면 보인다. 화면은 "전부"가 아니라
+ * "어디를 봐야 하는지"를 보여줘야 한다.
+ */
+function coreBounds(
+  meta: Manifest,
+  within: Array<[number, number]>,
+  walkCapMinutes: number,
+): Bounds {
+  const lons: number[] = [];
+  const lats: number[] = [];
+  for (const [i] of within) {
+    const st = meta.stations[i];
+    lons.push(st.lon);
+    lats.push(st.lat);
+  }
+  if (lons.length === 0) return SEOUL_BOUNDS;
+  lons.sort((a, b) => a - b);
+  lats.sort((a, b) => a - b);
+  const q = (v: number[], p: number) => v[Math.min(v.length - 1, Math.floor(v.length * p))];
+
+  // 역에서 걸어갈 수 있는 만큼은 더 보여줘야 한다. 도보 1분에 80m 로 잡는다.
+  const padMeters = walkCapMinutes * 80 + 1500;
+  const padLat = padMeters / 111_000;
+  const padLon = padMeters / (111_000 * Math.cos((q(lats, 0.5) * Math.PI) / 180));
+  return {
+    west: q(lons, 0.05) - padLon,
+    east: q(lons, 0.95) + padLon,
+    south: q(lats, 0.05) - padLat,
+    north: q(lats, 0.95) + padLat,
+  };
 }
 
 function findStation(meta: Manifest, name: string): number | null {
