@@ -160,7 +160,13 @@ function smooth(values: Float32Array, rows: number, cols: number, passes: number
   }
 }
 
-/** 도달 역 자체를 점으로. 등시선만으로는 어디가 역인지 안 보인다. */
+/**
+ * 도달 역 자체를 점으로. 등시선만으로는 어디가 역인지 안 보인다.
+ *
+ * `index` 를 넣는 이유는 클릭해서 직장역으로 바꿀 수 있어야 하기 때문이고,
+ * `interchange` 는 환승역을 가운데 흰 점으로 구분하기 위해서다 — 노선도의
+ * 전통적인 표기법이다.
+ */
 export function buildStationGeoJSON(
   stations: StationMeta[],
   within: Array<[number, number]>,
@@ -170,7 +176,12 @@ export function buildStationGeoJSON(
     features: within.map(([i, minutes]) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [stations[i].lon, stations[i].lat] },
-      properties: { minutes, name: stations[i].name },
+      properties: {
+        minutes,
+        name: stations[i].name,
+        index: i,
+        interchange: stations[i].lines.length > 1 ? 1 : 0,
+      },
     })),
   };
 }

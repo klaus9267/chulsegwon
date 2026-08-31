@@ -169,6 +169,19 @@ export class MapLibreAdapter implements MapAdapter {
     return { lon: c.lng, lat: c.lat };
   }
 
+  onStationClick(handler: (stationIndex: number) => void): void {
+    this.map.on("click", STATION_SOURCE, (e) => {
+      const f = e.features?.[0];
+      if (f) handler(Number((f.properties as { index: number }).index));
+    });
+    this.map.on("mouseenter", STATION_SOURCE, () => {
+      this.map.getCanvas().style.cursor = "pointer";
+    });
+    this.map.on("mouseleave", STATION_SOURCE, () => {
+      this.map.getCanvas().style.cursor = "";
+    });
+  }
+
   /** 레이어가 붙었는지. 백그라운드 탭에서는 실패할 수 있어 호출부가 알아야 한다. */
   get ready(): boolean {
     return !!this.map.getSource(BAND_SOURCE);
@@ -237,19 +250,59 @@ function installLayers(map: maplibregl.Map) {
     firstSymbol,
   );
 
+  // 역 점. 노선도 관례를 따른다 — 일반역은 채운 점, 환승역은 가운데 흰 점.
+  // 크기는 픽셀 기준이라 줌을 해도 커지지 않는다(카카오에서 미터 반경을 써서
+  // 확대할수록 흰 덩어리가 되던 문제를 여기서는 처음부터 피한다).
   map.addLayer(
     {
       id: STATION_SOURCE,
       type: "circle",
       source: STATION_SOURCE,
       paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 1.8, 14, 4.5],
-        "circle-color": "#ffffff",
-        "circle-stroke-color": "#12467f",
-        "circle-stroke-width": 1,
-        "circle-opacity": 0.95,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.4, 12, 4, 15, 6],
+        "circle-color": "#12467f",
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 9, 1, 15, 1.8],
+        "circle-opacity": 0.92,
       },
     },
     firstSymbol,
+  );
+
+  // 환승역만 가운데 흰 점. 노선도에서 환승을 표시하는 전통적인 방법이다.
+  map.addLayer(
+    {
+      id: "reach-interchange",
+      type: "circle",
+      source: STATION_SOURCE,
+      filter: ["==", ["get", "interchange"], 1],
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 0.9, 12, 1.6, 15, 2.4],
+        "circle-color": "#ffffff",
+      },
+    },
+    firstSymbol,
+  );
+
+  // 이름은 가까이 봤을 때만. 멀리서 다 띄우면 지도가 글자로 덮인다.
+  map.addLayer(
+    {
+      id: "reach-station-label",
+      type: "symbol",
+      source: STATION_SOURCE,
+      minzoom: 12.5,
+      layout: {
+        "text-field": ["get", "name"],
+        "text-size": 11,
+        "text-offset": [0, 1.1],
+        "text-anchor": "top",
+        "text-allow-overlap": false,
+      },
+      paint: {
+        "text-color": "#12467f",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.4,
+      },
+    },
   );
 }

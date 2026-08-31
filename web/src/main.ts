@@ -123,6 +123,11 @@ async function main() {
       return { value, hint: st.lines.map(lineName).join(" · ") };
     });
 
+  /** 콤보박스에 보여줄 표시값. 같은 이름의 역이 있으면 노선이 붙은 쪽이다. */
+  const indexToDisplay = new Map<number, string>();
+  for (const [display, idx] of displayToIndex) indexToDisplay.set(idx, display);
+  const comboLabelFor = (i: number) => indexToDisplay.get(i) ?? meta.stations[i].name;
+
   const originInput = $<HTMLInputElement>("origin");
   createCombobox({
     input: originInput,
@@ -200,6 +205,16 @@ async function main() {
   });
 
   map = await createMap(SEOUL_BOUNDS);
+
+  // 지도에서 역을 눌러 직장을 바꾼다. 콤보박스로 이름을 치는 것보다,
+  // 도달권을 보다가 "여기서 다니면 어떻지?" 하고 바로 눌러보는 흐름이 자연스럽다.
+  map.onStationClick((index) => {
+    state.origin = index;
+    originInput.value = comboLabelFor(index);
+    showOrigins();
+    void render();
+  });
+
   showOrigins();
   $("warn").textContent =
     (map.basemapOk ? "" : "⚠ 배경지도를 불러오지 못해 도달권만 표시합니다. ") + "⚠ " + meta.warning;

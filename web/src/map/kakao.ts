@@ -20,6 +20,7 @@ interface KakaoNS {
     Polygon: new (opts: Record<string, unknown>) => KakaoOverlay;
     Circle: new (opts: Record<string, unknown>) => KakaoOverlay;
     Marker: new (opts: Record<string, unknown>) => KakaoOverlay;
+    CustomOverlay: new (opts: Record<string, unknown>) => KakaoOverlay;
     ZoomControl: new () => object;
     ControlPosition: { RIGHT: unknown };
   };
@@ -92,6 +93,7 @@ export class KakaoAdapter implements MapAdapter {
 
   private bandOverlays: KakaoOverlay[] = [];
   private stationOverlays: KakaoOverlay[] = [];
+  private stationClick: ((index: number) => void) | null = null;
   private originMarkers: KakaoOverlay[] = [];
 
   private constructor(
@@ -160,31 +162,47 @@ export class KakaoAdapter implements MapAdapter {
   }
 
   /**
-   * 역 점은 상한을 둔다.
+   * 역 점.
    *
-   * MapLibre 는 점 수백 개를 한 레이어로 GPU 에서 그리지만, 카카오는 오버레이가
-   * 객체 하나씩이라 300개를 얹으면 팬·줌이 눈에 띄게 무거워진다.
+   * `Circle` 을 쓰면 안 된다. 반경이 **미터** 라 확대할수록 화면에서 커져서,
+   * 줌인하면 지도가 흰 덩어리로 덮인다. CustomOverlay 로 DOM 을 얹으면 크기가
+   * 픽셀 고정이라 어느 배율에서도 같은 크기로 보인다.
+   *
+   * 상한을 두는 이유는 오버레이가 객체 하나씩이라서다. MapLibre 는 한 레이어로
+   * GPU 가 그리지만 여기는 DOM 이므로 수백 개를 넘기면 팬·줌이 무거워진다.
    */
   setStations(stations: GeoJSON.FeatureCollection): void {
     for (const o of this.stationOverlays) o.setMap(null);
     this.stationOverlays = [];
 
-    const MAX = 200;
-    const feats = stations.features.slice(0, MAX);
-    for (const f of feats) {
+    const MAX = 300;
+    for (const f of stations.features.slice(0, MAX)) {
       const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;
-      const dot = new this.ns.maps.Circle({
-        center: new this.ns.maps.LatLng(lat, lon),
-        radius: 90,
-        strokeWeight: 1,
-        strokeColor: "#12467f",
-        strokeOpacity: 0.9,
-        fillColor: "#ffffff",
-        fillOpacity: 0.9,
+      const p = f.properties as { name: string; index: number; interchange: number };
+
+      const el = document.createElement("div");
+      el.className = p.interchange ? "kdot kdot-ic" : "kdot";
+      el.dataset.name = p.name;
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.stationClick?.(p.index);
       });
-      dot.setMap(this.map);
-      this.stationOverlays.push(dot);
+
+      const overlay = new this.ns.maps.CustomOverlay({
+        position: new this.ns.maps.LatLng(lat, lon),
+        content: el,
+        xAnchor: 0.5,
+        yAnchor: 0.5,
+        clickable: true,
+        zIndex: 3,
+      });
+      overlay.setMap(this.map);
+      this.stationOverlays.push(overlay);
     }
+  }
+
+  onStationClick(handler: (stationIndex: number) => void): void {
+    this.stationClick = handler;
   }
 
   setOrigins(points: LngLat[]): void {

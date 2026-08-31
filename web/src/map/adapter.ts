@@ -42,6 +42,8 @@ export interface MapAdapter {
   easeTo(at: LngLat, zoom: number): void;
   /** 지금 보고 있는 중심. 외부 서비스로 넘길 때 쓴다. */
   getCenter(): LngLat;
+  /** 역을 클릭했을 때. 지도에서 바로 직장역을 바꾸기 위한 것. */
+  onStationClick(handler: (stationIndex: number) => void): void;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */
