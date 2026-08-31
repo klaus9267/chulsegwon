@@ -22,6 +22,49 @@ fun main(args: Array<String>) {
     val transferOverhead = (opts["--transfer-overhead-sec"] ?: "90").toInt()
     val originLimit = (opts["--origins"] ?: "0").toInt()   // 0 = 전부. 실측용.
 
+    if (opts["--mode"] == "reagg") {
+        Deals.reaggregate(
+            rawFiles = (opts["--in"] ?: "data/raw/rent/deals-raw.jsonl")
+                .split(",").map { File(it.trim()) },
+            outDir = File(opts["--out"] ?: "data/raw/rent"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "places") {
+        val key = System.getenv("KAKAO_REST_KEY")
+            ?: error("KAKAO_REST_KEY 가 없다. .env 를 읽고 실행할 것")
+        val kw = opts["--keyword"] ?: "백화점"
+        Places.run(key, kw, File(opts["--out"] ?: "data/raw/places-$kw.json"))
+        return
+    }
+
+    if (opts["--mode"] == "amenity") {
+        val key = System.getenv("KAKAO_REST_KEY")
+            ?: error("KAKAO_REST_KEY 가 없다. .env 를 읽고 실행할 것")
+        Amenities.run(
+            key = key,
+            inFile = File(opts["--in"] ?: "web/public/data/dongs.json"),
+            outFile = File(opts["--out"] ?: "web/public/data/amenities.json"),
+            cacheFile = File(opts["--cache"] ?: "data/raw/rent/amenity-cache.json"),
+            placeDir = File(opts["--places"] ?: "data/raw"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "donggeo") {
+        val key = System.getenv("KAKAO_REST_KEY")
+            ?: error("KAKAO_REST_KEY 가 없다. .env 를 읽고 실행할 것")
+        DongGeo.run(
+            key = key,
+            inFile = File(opts["--in"] ?: "data/raw/rent/dongs-raw.json"),
+            outFile = File(opts["--out"] ?: "web/public/data/dongs.json"),
+            cacheFile = File(opts["--cache"] ?: "data/raw/rent/dong-cache.json"),
+            sggNameFile = File(opts["--sgg"] ?: "data/raw/sgg-names.json"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "geocode") {
         // 카카오 REST 키. 프론트 번들에 들어가면 안 되므로 VITE_ 를 쓰지 않는다.
         val kakao = System.getenv("KAKAO_REST_KEY")
@@ -49,6 +92,7 @@ fun main(args: Array<String>) {
             months = (opts["--months"] ?: "12").toInt(),
             outDir = File(opts["--out"] ?: "data/raw/deals"),
             sggFilter = opts["--sgg"]?.split(","),
+            rental = opts["--rental"] == "true",
         )
         return
     }

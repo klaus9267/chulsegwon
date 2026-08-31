@@ -18,5 +18,7 @@ web/idx*.html
 .env
 .env.local
 
-# 수집 데이터 (생성물)
+# 수집 데이터 (생성물). 원본 그래프와 손으로 만든 코드표는 남긴다.
 data/raw/deals/
+data/raw/rent/
+.claude/launch.json

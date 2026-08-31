@@ -2,173 +2,424 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>출세권</title>
 <style>
   :root {
-    --bg: #ffffff; --fg: #14171a; --muted: #6b7480;
-    --line: #e3e6ea; --accent: #2b6cb0; --panel: rgba(255,255,255,.97);
+    --bg:#fff; --fg:#14171a; --muted:#6b7480; --faint:#9aa3af;
+    --line:#e6e9ed; --line-soft:#f0f2f5;
+    --accent:#2b6cb0; --accent-deep:#12467f; --accent-soft:#eaf1f9;
+    --warm:#e07b39;
+    --panel:rgba(255,255,255,.96);
+    --shadow:0 4px 16px rgba(16,24,40,.08), 0 1px 3px rgba(16,24,40,.06);
+    --radius:14px;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#12151a; --fg:#e8eaed; --muted:#9aa3af; --line:#2a2f38; --panel:rgba(20,23,28,.97); }
+    :root {
+      --bg:#12151a; --fg:#e8eaed; --muted:#9aa3af; --faint:#6b7480;
+      --line:#2a2f38; --line-soft:#1c2128;
+      --accent:#4a90c4; --accent-deep:#7fb3d5; --accent-soft:#1a2733;
+      --panel:rgba(18,21,26,.96);
+      --shadow:0 4px 16px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+    }
   }
-  * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:14px/1.5 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo",
+      "Malgun Gothic", sans-serif; -webkit-font-smoothing:antialiased; }
   #map { position:absolute; inset:0; }
 
+  /* ── 패널 ───────────────────────────────────────────── */
   #panel {
-    position:absolute; z-index:2; top:12px; left:12px; width:320px; max-width:calc(100vw - 24px);
-    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px;
-    backdrop-filter:blur(8px); box-shadow:0 6px 24px rgba(0,0,0,.12);
+    position:absolute; z-index:2; top:14px; left:14px; width:322px;
+    max-height:calc(100vh - 28px);
+    /* 조건은 스크롤하고 결과는 항상 보인다. 결과가 접혀 내려가면 조작할 이유가 없어진다. */
+    display:flex; flex-direction:column; overflow:hidden; overscroll-behavior:contain;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    backdrop-filter:blur(12px) saturate(1.4); box-shadow:var(--shadow);
+    animation:panelIn .42s cubic-bezier(.2,.8,.25,1) both;
   }
-  h1 { margin:0 0 2px; font-size:15px; font-weight:650; letter-spacing:-.2px; }
-  .sub { margin:0 0 12px; font-size:11.5px; color:var(--muted); }
-  .row { margin-bottom:11px; }
-  label { display:block; font-size:11.5px; color:var(--muted); margin-bottom:4px; font-weight:550; }
-  input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
-    background:var(--bg); color:var(--fg); font-size:14px; }
-  .rowhead { display:flex; justify-content:space-between; align-items:baseline; }
-  .linkbtn { border:0; background:none; padding:0; color:var(--accent); font-size:11px;
-    cursor:pointer; font-weight:600; }
-  .linkbtn[hidden] { display:none; }
-  .combo { position:relative; }
-  .combo input { padding-right:34px; }
-  .combo-toggle { position:absolute; top:0; right:0; width:32px; height:100%;
-    border:0; background:transparent; color:var(--muted); font-size:13px; cursor:pointer; line-height:1; }
-  .combo-list { position:absolute; z-index:5; top:calc(100% + 4px); left:0; right:0;
-    margin:0; padding:4px; list-style:none; max-height:240px; overflow-y:auto;
-    background:var(--bg); border:1px solid var(--line); border-radius:9px;
-    box-shadow:0 8px 24px rgba(0,0,0,.16); }
-  .combo-list li { padding:7px 9px; border-radius:6px; cursor:pointer; font-size:13.5px;
+  @keyframes panelIn { from{opacity:0; transform:translateY(-10px) scale(.985);} to{opacity:1;transform:none;} }
+  #panel .scroll { flex:1 1 auto; overflow-y:auto; min-height:0; overscroll-behavior:contain; }
+  #panel .scroll::-webkit-scrollbar { width:8px; }
+  #panel .scroll::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px; }
+  .result { flex:0 0 auto; }
+
+  .grab{ display:none; }
+  .head { padding:16px 18px 12px; display:flex; align-items:flex-start;
+    justify-content:space-between; gap:10px; }
+  .head h1 { margin:0; font-size:17px; font-weight:700; letter-spacing:-.4px; }
+  .head p { margin:3px 0 0; font-size:12px; color:var(--muted); }
+
+  .step { padding:13px 18px; border-top:1px solid var(--line-soft);
+    animation:stepIn .5s cubic-bezier(.2,.8,.25,1) both; }
+  .step:nth-of-type(1){animation-delay:.05s} .step:nth-of-type(2){animation-delay:.11s}
+  .step:nth-of-type(3){animation-delay:.17s}
+  @keyframes stepIn { from{opacity:0;transform:translateY(6px);} to{opacity:1;transform:none;} }
+  .step > h2 { margin:0 0 9px; font-size:11.5px; font-weight:700; color:var(--muted);
+    letter-spacing:.2px; display:flex; align-items:center; gap:6px; }
+  .step > h2 b { display:inline-flex; align-items:center; justify-content:center;
+    width:16px; height:16px; border-radius:50%; background:var(--accent-soft);
+    color:var(--accent); font-size:10px; font-weight:800; }
+
+  .field { margin-bottom:9px; }
+  .field:last-child { margin-bottom:0; }
+  .flabel { display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12px; color:var(--muted); margin-bottom:5px; font-weight:550; }
+  .val { color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums;
+    transition:color .18s ease; }
+  .val.bump { color:var(--accent); }
+
+  input[type=text] { width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line);
+    border-radius:10px; background:var(--bg); color:var(--fg); font-size:14px; font-weight:550;
+    transition:border-color .16s ease, box-shadow .16s ease; }
+  input[type=text]:focus { outline:none; border-color:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-soft); }
+
+  /* 슬라이더 */
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:22px;
+    background:transparent; margin:0; cursor:pointer; }
+  input[type=range]::-webkit-slider-runnable-track{ height:4px; border-radius:2px;
+    background:var(--line); }
+  input[type=range]::-moz-range-track{ height:4px; border-radius:2px; background:var(--line); }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:16px; height:16px;
+    margin-top:-6px; border-radius:50%; background:var(--accent); border:2.5px solid var(--bg);
+    box-shadow:0 1px 4px rgba(16,24,40,.28); transition:transform .14s cubic-bezier(.2,.8,.25,1); }
+  input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%;
+    background:var(--accent); border:2.5px solid var(--bg); box-shadow:0 1px 4px rgba(16,24,40,.28); }
+  input[type=range]:active::-webkit-slider-thumb{ transform:scale(1.28); }
+  input[type=range]:focus{ outline:none; }
+
+  /* 세그먼트 */
+  .seg { display:flex; gap:4px; background:var(--line-soft); padding:3px; border-radius:10px; }
+  .seg button { flex:1; padding:7px 4px; border:0; border-radius:7px; background:transparent;
+    color:var(--muted); font-size:12.5px; font-weight:650; cursor:pointer;
+    transition:background .18s ease, color .18s ease, box-shadow .18s ease; }
+  .seg button[aria-pressed=true]{ background:var(--bg); color:var(--accent);
+    box-shadow:0 1px 3px rgba(16,24,40,.1); }
+
+  .step > h2 .opt{ font-weight:500; color:var(--faint); }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chips button{ padding:7px 11px; border:1px solid var(--line); border-radius:999px;
+    background:transparent; color:var(--muted); font-size:12px; font-weight:600; cursor:pointer;
+    transition:border-color .16s, color .16s, background .16s, transform .1s; }
+  .chips button:hover{ border-color:var(--accent); color:var(--accent); }
+  .chips button[aria-pressed=true]{ background:var(--accent); border-color:var(--accent);
+    color:#fff; }
+  .chips button:active{ transform:scale(.96); }
+
+  .linkbtn { border:0; background:none; padding:0; color:var(--accent); font-size:11.5px;
+    cursor:pointer; font-weight:650; }
+  .linkbtn[hidden]{ display:none; }
+
+  /* 콤보박스 */
+  .combo{ position:relative; }
+  .combo-toggle{ position:absolute; top:0; right:0; width:32px; height:100%; border:0;
+    background:transparent; color:var(--faint); font-size:11px; cursor:pointer; }
+  .combo-list{ position:absolute; z-index:5; top:calc(100% + 5px); left:0; right:0; margin:0;
+    padding:5px; list-style:none; max-height:236px; overflow-y:auto; background:var(--bg);
+    border:1px solid var(--line); border-radius:11px; box-shadow:var(--shadow);
+    animation:listIn .16s ease both; }
+  @keyframes listIn { from{opacity:0;transform:translateY(-4px);} to{opacity:1;transform:none;} }
+  .combo-list li{ padding:8px 10px; border-radius:7px; cursor:pointer; font-size:13.5px;
     display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
-  .combo-list li .hint { color:var(--muted); font-size:11px; flex-shrink:0; }
-  .combo-list li[aria-selected=true] { background:var(--accent); color:#fff; }
-  .combo-list li[aria-selected=true] .hint { color:rgba(255,255,255,.8); }
-  .combo-list .empty { color:var(--muted); cursor:default; justify-content:flex-start; }
-  input[type=range] { width:100%; accent-color:var(--accent); margin:0; }
-  .val { float:right; color:var(--fg); font-variant-numeric:tabular-nums; font-weight:600; }
-  .seg { display:flex; gap:6px; }
-  .seg button { flex:1; padding:7px 4px; border:1px solid var(--line); border-radius:8px;
-    background:transparent; color:var(--muted); font-size:12.5px; cursor:pointer; font-weight:550; }
-  .seg button[aria-pressed=true] { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .run { width:100%; margin-top:2px; padding:11px 8px; border:0; border-radius:9px;
-    background:var(--accent); color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
-  .run:disabled { background:var(--line); color:var(--muted); cursor:default; }
-  .run:not(:disabled):active { transform:translateY(1px); }
-  .handoff { display:block; width:100%; margin-top:8px; padding:9px 8px; text-align:center;
-    border:1px solid var(--line); border-radius:9px; background:transparent;
-    color:var(--fg); font-size:12.5px; font-weight:550; cursor:pointer; text-decoration:none; }
-  .handoff:hover { border-color:var(--accent); color:var(--accent); }
-  /* 카카오 역 점. 노선도 관례 — 일반역은 채운 점, 환승역은 가운데 흰 점.
-     크기를 px 로 두어 확대해도 커지지 않게 한다. */
-  .kdot { width:11px; height:11px; border-radius:50%; background:#12467f;
+  .combo-list li .hint{ color:var(--faint); font-size:10.5px; flex-shrink:0; }
+  .combo-list li[aria-selected=true]{ background:var(--accent); color:#fff; }
+  .combo-list li[aria-selected=true] .hint{ color:rgba(255,255,255,.82); }
+  .combo-list .empty{ color:var(--faint); cursor:default; justify-content:flex-start; }
+
+  /* 결과 영역 */
+  .result { padding:12px 18px 14px; border-top:1px solid var(--line); }
+  #legend{ display:flex; gap:2px; }
+  #legend .band{ flex:1; text-align:center; }
+  #legend .band i{ display:block; height:7px; border-radius:2px; }
+  #legend .band b{ display:block; font-size:9.5px; font-weight:600; color:var(--faint);
+    margin-top:4px; font-variant-numeric:tabular-nums; }
+  #legendLabels{ font-size:10px; color:var(--faint); margin-top:2px; }
+  #status{ margin-top:8px; font-size:12.5px; color:var(--fg); font-weight:600;
+    line-height:1.4; min-height:1.4em; }
+  #status .dim{ color:var(--muted); font-weight:500; }
+
+  .handoff{ display:block; width:100%; margin-top:11px; padding:11px 8px; text-align:center;
+    border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg);
+    font-size:12.5px; font-weight:650; cursor:pointer;
+    transition:border-color .16s, color .16s, transform .1s; }
+  .handoff:hover{ border-color:var(--accent); color:var(--accent); }
+  .handoff:active{ transform:translateY(1px); }
+
+  /* 추천 목록 — 지도만으로는 "그래서 어디?" 에 답이 안 된다 */
+  .ranktop{ display:flex; align-items:center; gap:7px; margin-top:11px; }
+  .ranktop > span{ font-size:11.5px; font-weight:700; color:var(--muted); }
+  .ranktop .sortseg{ margin-left:auto; }
+  .sortseg{ display:flex; gap:2px; background:var(--line-soft); padding:2px; border-radius:8px; }
+  .sortseg button{ border:0; background:transparent; border-radius:6px; padding:4px 7px;
+    font-size:10.5px; font-weight:650; color:var(--muted); cursor:pointer;
+    transition:background .16s, color .16s; }
+  .sortseg button[aria-pressed=true]{ background:var(--bg); color:var(--accent);
+    box-shadow:0 1px 2px rgba(16,24,40,.09); }
+
+  .rank{ list-style:none; margin:7px 0 0; padding:0; counter-reset:r; }
+  .rank li{ counter-increment:r; display:flex; align-items:baseline; gap:8px;
+    padding:5px 8px; border-radius:8px; cursor:pointer; font-size:12.5px;
+    transition:background .14s ease; animation:rowIn .3s cubic-bezier(.2,.8,.25,1) both; }
+  @keyframes rowIn{ from{opacity:0; transform:translateX(-6px);} to{opacity:1;transform:none;} }
+  .rank li:nth-child(1){animation-delay:.02s} .rank li:nth-child(2){animation-delay:.05s}
+  .rank li:nth-child(3){animation-delay:.08s} .rank li:nth-child(4){animation-delay:.11s}
+  .rank li:nth-child(5){animation-delay:.14s}
+  .rank li:hover{ background:var(--accent-soft); }
+  .rank li::before{ content:counter(r); flex-shrink:0; width:15px; font-size:10px;
+    font-weight:800; color:var(--faint); }
+  .rank .nm{ font-weight:700; flex-shrink:0; }
+  .rank .mt{ color:var(--muted); font-size:11px; }
+  .rank .pr{ margin-left:auto; font-weight:750; font-variant-numeric:tabular-nums;
+    color:var(--accent-deep); flex-shrink:0; }
+  .rank .empty{ color:var(--faint); cursor:default; font-size:11.5px; }
+  .rank .empty:hover{ background:none; }
+
+  .share{ flex-shrink:0; margin-top:2px; padding:5px 9px; border:1px solid var(--line);
+    border-radius:999px; background:transparent; color:var(--muted); font-size:10.5px;
+    font-weight:650; cursor:pointer; white-space:nowrap;
+    transition:border-color .16s, color .16s, transform .1s; }
+  .share:hover{ border-color:var(--accent); color:var(--accent); }
+  .share:active{ transform:scale(.95); }
+  .share:hover{ opacity:.7; }
+  .share.done{ color:var(--accent-deep); }
+
+  .warn{ padding:0 18px 14px; font-size:10.5px; color:#b45309; line-height:1.45; }
+  .warn:empty{ display:none; }
+  @media (prefers-color-scheme: dark){ .warn{ color:#fbbf24; } }
+
+  /* 지도 위 점 */
+  .kdot{ width:11px; height:11px; border-radius:50%; background:var(--accent-deep);
     border:1.6px solid #fff; box-sizing:border-box; cursor:pointer; position:relative;
-    box-shadow:0 1px 3px rgba(0,0,0,.28); transition:transform .12s ease; }
-  .kdot::before { content:""; position:absolute; inset:2.4px; border-radius:50%;
-    background:#fff; opacity:0; }
-  .kdot-ic::before { opacity:1; }
-  .kdot:hover { transform:scale(1.45); z-index:9; }
-  .kdot::after { content:attr(data-name); position:absolute; left:50%; top:15px;
-    transform:translateX(-50%); white-space:nowrap; font-size:11px; font-weight:600;
-    color:#12467f; background:rgba(255,255,255,.92); padding:1px 5px; border-radius:4px;
-    opacity:0; pointer-events:none; transition:opacity .12s ease; }
-  .kdot:hover::after { opacity:1; }
+    box-shadow:0 1px 3px rgba(0,0,0,.28); transition:transform .14s cubic-bezier(.2,.8,.25,1);
+    animation:dotIn .3s ease both; }
+  @keyframes dotIn{ from{opacity:0;transform:scale(.4);} to{opacity:1;transform:none;} }
+  .kdot::before{ content:""; position:absolute; inset:2.4px; border-radius:50%; background:#fff; opacity:0; }
+  .kdot-ic::before{ opacity:1; }
+  .kdot:hover{ transform:scale(1.45); z-index:9; }
+  .kdot::after{ content:attr(data-name); position:absolute; left:50%; top:15px;
+    transform:translateX(-50%); white-space:nowrap; font-size:11px; font-weight:650;
+    color:var(--accent-deep); background:rgba(255,255,255,.94); padding:2px 6px;
+    border-radius:5px; opacity:0; pointer-events:none; transition:opacity .14s ease;
+    box-shadow:0 1px 4px rgba(0,0,0,.14); }
+  .kdot:hover::after{ opacity:1; }
 
-  .cdot { width:7px; height:7px; border-radius:50%; background:#e07b39;
-    border:1px solid #fff; box-sizing:border-box; position:relative; cursor:default; }
-  .cdot::after { content:attr(data-name); position:absolute; left:50%; top:11px;
-    transform:translateX(-50%); white-space:nowrap; font-size:10.5px; font-weight:600;
-    color:#8a4a12; background:rgba(255,255,255,.94); padding:1px 5px; border-radius:4px;
-    opacity:0; pointer-events:none; }
-  .cdot:hover { transform:scale(1.6); z-index:8; }
-  .cdot:hover::after { opacity:1; }
+  .cdot{ width:7px; height:7px; border-radius:50%; background:var(--warm);
+    border:1px solid #fff; box-sizing:border-box; position:relative;
+    transition:transform .14s ease; animation:dotIn .3s ease both; }
+  .cdot::after{ content:attr(data-name); position:absolute; left:50%; top:11px;
+    transform:translateX(-50%); white-space:nowrap; font-size:10.5px; font-weight:650;
+    color:#8a4a12; background:rgba(255,255,255,.95); padding:2px 6px; border-radius:5px;
+    opacity:0; pointer-events:none; box-shadow:0 1px 4px rgba(0,0,0,.14); }
+  .cdot:hover{ transform:scale(1.7); z-index:8; }
+  .cdot:hover::after{ opacity:1; }
 
-  #legend { display:flex; gap:2px; margin-top:10px; }
-  #legend .band { flex:1; text-align:center; }
-  #legend .band i { display:block; height:8px; border-radius:2px; }
-  #legend .band b { display:block; font-size:9.5px; font-weight:500; color:var(--muted);
-    margin-top:3px; font-variant-numeric:tabular-nums; }
-  #legendLabels { font-size:10.5px; color:var(--muted); margin-top:2px; }
-  #status { margin-top:10px; font-size:11.5px; color:var(--muted); min-height:1.4em; }
-  #warn { margin-top:8px; font-size:10.5px; color:#b45309; line-height:1.45; }
-  @media (prefers-color-scheme: dark) { #warn { color:#fbbf24; } }
+  /* 동네 시세 라벨 — 지도에서 값을 바로 읽히게 한다 */
+  .dlabel{ display:flex; flex-direction:column; align-items:center; line-height:1.15;
+    padding:4px 8px 5px; border-radius:9px; background:rgba(255,255,255,.94);
+    border:1px solid rgba(18,70,127,.16); box-shadow:0 1px 5px rgba(16,24,40,.13);
+    white-space:nowrap; cursor:default; transition:transform .14s cubic-bezier(.2,.8,.25,1),
+      box-shadow .14s ease; animation:dotIn .32s cubic-bezier(.2,.8,.25,1) both; }
+  .dlabel b{ font-size:10.5px; font-weight:600; color:#5a6472; letter-spacing:-.2px; }
+  .dlabel span{ font-size:13px; font-weight:800; color:#12467f; font-variant-numeric:tabular-nums;
+    letter-spacing:-.3px; }
+  .dlabel i{ font-size:9.5px; font-style:normal; color:#8a94a3; margin-top:1px; }
+  .dlabel:hover{ transform:scale(1.08); box-shadow:0 3px 12px rgba(16,24,40,.2); z-index:10; }
+  /* 좁은 화면에서는 라벨이 클수록 보이는 동네가 줄어든다. 읽히는 선에서 줄인다. */
+  @media (max-width:640px){
+    .dlabel{ padding:3px 6px 4px; border-radius:8px; }
+    .dlabel b{ font-size:9px; }
+    .dlabel span{ font-size:11.5px; }
+    .dlabel i{ font-size:8.5px; }
+  }
 
-  @media (max-width: 640px) {
-    #panel { top:auto; bottom:0; left:0; width:100%; max-width:none;
-      border-radius:14px 14px 0 0; border-left:0; border-right:0; border-bottom:0;
-      max-height:62vh; overflow-y:auto; }
+  /* 접이식 세부 설정 — 대부분은 기본값으로 충분하고, 필요할 때만 연다 */
+  .more{ margin-top:2px; }
+  .more summary{ list-style:none; cursor:pointer; font-size:11.5px; color:var(--muted);
+    padding:5px 0; display:flex; align-items:center; gap:5px; user-select:none; }
+  .more summary::-webkit-details-marker{ display:none; }
+  .more summary::before{ content:"›"; display:inline-block; font-size:13px; color:var(--faint);
+    transition:transform .18s ease; }
+  .more[open] summary::before{ transform:rotate(90deg); }
+  .more summary span{ color:var(--faint); font-size:10.5px; }
+  .more[open] summary span{ display:none; }
+  .more .field{ margin-top:8px; }
+
+  /* 동네 상세 카드 — 지도 위에 떠서 조건 패널을 밀어내지 않는다 */
+  .detail{ position:absolute; z-index:3; top:14px; left:350px; width:266px;
+    max-height:calc(100vh - 28px); overflow-y:auto;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    backdrop-filter:blur(12px) saturate(1.4); box-shadow:var(--shadow);
+    padding:14px 16px 16px;
+    animation:cardIn .26s cubic-bezier(.2,.8,.25,1) both; }
+  @keyframes cardIn{ from{opacity:0; transform:translateX(-10px) scale(.98);} to{opacity:1;transform:none;} }
+  .detail[hidden]{ display:none; }
+  .detail .dtop{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .detail h3{ margin:0; font-size:16px; font-weight:750; letter-spacing:-.3px; }
+  .detail .gu{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .detail .close{ border:0; background:none; color:var(--faint); font-size:16px;
+    cursor:pointer; padding:0 2px; line-height:1; }
+  .detail .commute{ margin-top:9px; padding:8px 10px; border-radius:9px;
+    background:var(--accent-soft); font-size:12.5px; font-weight:650; color:var(--accent-deep); }
+  .detail .unit{ margin-top:12px; font-size:10.5px; color:var(--faint); font-weight:600; }
+  .detail table{ width:100%; margin-top:4px; border-collapse:collapse; font-size:12.5px; }
+  .detail td{ padding:6px 0; border-bottom:1px solid var(--line-soft); }
+  .detail tr:last-child td{ border-bottom:0; }
+  .detail td:first-child{ color:var(--muted); width:62px; }
+  .detail td:nth-child(2){ font-weight:750; font-variant-numeric:tabular-nums; }
+  .detail td:last-child{ text-align:right; color:var(--faint); font-size:10.5px; }
+  .detail .none{ color:var(--faint); font-weight:400; }
+  .detail .go{ display:block; width:100%; margin-top:12px; padding:10px; text-align:center;
+    border-radius:10px; background:var(--accent); color:#fff; font-size:12.5px; font-weight:700;
+    text-decoration:none; transition:filter .15s, transform .1s; }
+  .detail .go:hover{ filter:brightness(1.08); }
+  .detail .go:active{ transform:translateY(1px); }
+
+  /* ── 모바일: 하단 시트 ─────────────────────────────── */
+  @media (max-width:640px){
+    #panel{ top:auto; bottom:0; left:0; width:100%; max-width:none;
+      border-radius:18px 18px 0 0; border-left:0; border-right:0; border-bottom:0;
+      max-height:min(72vh, 640px); padding-bottom:env(safe-area-inset-bottom);
+      animation:sheetIn .38s cubic-bezier(.2,.9,.25,1) both; }
+    @keyframes sheetIn{ from{transform:translateY(24px);opacity:0;} to{transform:none;opacity:1;} }
+    .grab{ display:block; width:100%; height:22px; border:0; background:transparent;
+      cursor:pointer; padding:0; position:relative; }
+    .grab::before{ content:""; position:absolute; left:50%; top:9px; transform:translateX(-50%);
+      width:38px; height:4px; border-radius:2px; background:var(--line); transition:background .16s; }
+    .grab:active::before{ background:var(--faint); }
+    .head{ padding:4px 18px 10px; }
+    .detail{ top:auto; bottom:calc(72vh + 8px); left:12px; right:12px; width:auto;
+      max-height:40vh; }
+    /* 접었을 때는 결과 한 줄만. 지도를 최대한 내준다. */
+    #panel.collapsed{ max-height:none; }
+    #panel.collapsed .scroll{ display:none; }
+    #panel.collapsed .result > *:not(#status){ display:none; }
+    #panel.collapsed .result{ padding:6px 18px 14px; }
+    #panel.collapsed #status{ margin-top:0; }
+    #panel.collapsed ~ .detail, .detail{ bottom:auto; top:12px; }
   }
 </style>
 </head>
 <body>
   <div id="map"></div>
+
+  <div id="detail" class="detail" hidden></div>
+
   <div id="panel">
-    <h1>출세권</h1>
-    <p class="sub">출퇴근 시간 안에 닿는 곳만 칠합니다. 역과 시간을 바꾸면 바로 반영됩니다.</p>
-
-    <div class="row">
-      <label for="origin">직장 역</label>
-      <div class="combo">
-        <input id="origin" type="text" placeholder="역 이름 입력 또는 목록에서 선택"
-               autocomplete="off" role="combobox" aria-expanded="false"
-               aria-controls="originList" aria-autocomplete="list" />
-        <button id="originToggle" class="combo-toggle" type="button" aria-label="역 목록 열기">▾</button>
-        <ul id="originList" class="combo-list" role="listbox" hidden></ul>
+    <button id="grab" class="grab" type="button" aria-label="조건 펼치기" aria-expanded="false"></button>
+    <div class="scroll">
+    <div class="head">
+      <div>
+        <h1>출세권</h1>
+        <p>통근 시간으로 살 곳을 좁힙니다</p>
       </div>
+      <button id="share" class="share" type="button" title="지금 조건을 링크로 복사">
+        링크 복사
+      </button>
     </div>
 
-    <div class="row">
-      <div class="rowhead">
-        <label for="origin2">직장 역 2 <span style="font-weight:400">· 맞벌이라면</span></label>
-        <button id="origin2Clear" class="linkbtn" type="button" hidden>지우기</button>
+    <section class="step">
+      <h2><b>1</b> 어디로 다니세요?</h2>
+      <div class="field">
+        <div class="combo">
+          <input id="origin" type="text" placeholder="직장·학교 역"
+                 autocomplete="off" role="combobox" aria-expanded="false"
+                 aria-controls="originList" aria-autocomplete="list" />
+          <button id="originToggle" class="combo-toggle" type="button" aria-label="역 목록">▾</button>
+          <ul id="originList" class="combo-list" role="listbox" hidden></ul>
+        </div>
       </div>
-      <div class="combo">
-        <input id="origin2" type="text" placeholder="비워두면 한 명 기준"
-               autocomplete="off" role="combobox" aria-expanded="false"
-               aria-controls="origin2List" aria-autocomplete="list" />
-        <button id="origin2Toggle" class="combo-toggle" type="button" aria-label="역 목록 열기">▾</button>
-        <ul id="origin2List" class="combo-list" role="listbox" hidden></ul>
+      <div class="field">
+        <div class="flabel">
+          <span>같이 사는 사람 <span style="font-weight:400">· 있다면</span></span>
+          <button id="origin2Clear" class="linkbtn" type="button" hidden>지우기</button>
+        </div>
+        <div class="combo">
+          <input id="origin2" type="text" placeholder="비워두면 한 명 기준"
+                 autocomplete="off" role="combobox" aria-expanded="false"
+                 aria-controls="origin2List" aria-autocomplete="list" />
+          <button id="origin2Toggle" class="combo-toggle" type="button" aria-label="역 목록">▾</button>
+          <ul id="origin2List" class="combo-list" role="listbox" hidden></ul>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="row">
-      <label>기준</label>
-      <div class="seg">
-        <button id="dirArrive" aria-pressed="true">출근 · 도착 기준</button>
-        <button id="dirDepart" aria-pressed="false">퇴근 · 출발 기준</button>
+    <section class="step">
+      <h2><b>2</b> 몇 분까지 괜찮아요?</h2>
+      <div class="field">
+        <div class="seg">
+          <button id="dirArrive" aria-pressed="true">출근 · 도착</button>
+          <button id="dirDepart" aria-pressed="false">퇴근 · 출발</button>
+        </div>
       </div>
+      <div class="field">
+        <div class="flabel"><span>통근 시간</span><span class="val" id="budgetVal">40분</span></div>
+        <input id="budget" type="range" min="10" max="120" step="5" value="40" />
+      </div>
+      <details class="more">
+        <summary>세부 설정 <span id="moreHint">기준 08:40 · 도보 15분</span></summary>
+        <div class="field">
+          <div class="flabel"><span>기준 시각</span><span class="val" id="timeVal">08:40</span></div>
+          <input id="time" type="range" min="0" max="114" value="19" />
+        </div>
+        <div class="field">
+          <div class="flabel"><span>역에서 도보</span><span class="val" id="walkVal">15분</span></div>
+          <input id="walk" type="range" min="0" max="25" value="15" />
+        </div>
+      </details>
+    </section>
+
+    <section class="step">
+      <h2><b>3</b> 어떤 집을 찾으세요?</h2>
+      <div class="field">
+        <div class="seg" id="roomSeg">
+          <button data-room="ONE" aria-pressed="true">원룸</button>
+          <button data-room="TWO" aria-pressed="false">투룸</button>
+          <button data-room="THREE" aria-pressed="false">쓰리룸+</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="seg" id="tenureSeg">
+          <button data-tenure="WOLSE" aria-pressed="true">월세</button>
+          <button data-tenure="JEONSE" aria-pressed="false">전세</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="flabel">
+          <span id="capLabel">월세 상한</span><span class="val" id="capVal">제한 없음</span>
+        </div>
+        <input id="cap" type="range" min="0" max="24" step="1" value="0" />
+      </div>
+    </section>
+
+    <section class="step" id="amenityStep" hidden>
+      <h2><b>4</b> 뭐가 가까웠으면 해요? <span class="opt">선택</span></h2>
+      <div class="chips" id="amenityChips"></div>
+    </section>
+    <div id="warn" class="warn"></div>
+
+    </div><!-- /scroll -->
+
+    <div class="result">
+      <div id="legend"></div>
+      <div id="legendLabels">색은 통근 시간 (분)</div>
+      <div id="status">불러오는 중…</div>
+
+      <div class="ranktop">
+        <span>추천 동네</span>
+        <div class="sortseg" id="sortSeg">
+          <button data-sort="commute" aria-pressed="true">가까운 순</button>
+          <button data-sort="price" aria-pressed="false">싼 순</button>
+          <button data-sort="amenity" aria-pressed="false">편의 순</button>
+        </div>
+      </div>
+      <ol id="rank" class="rank"></ol>
     </div>
 
-    <div class="row">
-      <label for="time">시각 <span class="val" id="timeVal">08:40</span></label>
-      <input id="time" type="range" min="0" max="114" value="19" />
-    </div>
-
-    <div class="row">
-      <label for="budget">도달 시간 <span class="val" id="budgetVal">40분</span></label>
-      <input id="budget" type="range" min="10" max="120" step="5" value="40" />
-    </div>
-
-    <div class="row">
-      <label for="walk">역에서 도보 상한 <span class="val" id="walkVal">15분</span></label>
-      <input id="walk" type="range" min="0" max="25" value="15" />
-    </div>
-
-    <button id="run" class="run">다시 계산</button>
-
-    <div class="row">
-      <label for="jeonse">전세 상한 <span class="val" id="jeonseVal">제한 없음</span></label>
-      <input id="jeonse" type="range" min="0" max="15" step="1" value="0" />
-    </div>
-
-    <button id="handoff" class="handoff" type="button">이 지역 매물 보기 → 네이버부동산</button>
-
-    <div id="legend"></div>
-    <div id="legendLabels">숫자는 <b id="legendMax">40분</b> 기준 구간 시작 (분)</div>
-    <div id="status">불러오는 중…</div>
-    <div id="warn"></div>
+    <button id="run" hidden></button>
   </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

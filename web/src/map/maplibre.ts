@@ -5,6 +5,7 @@ import type { Bounds, LngLat, MapAdapter, Padding, Ramp } from "./adapter";
 const BAND_SOURCE = "reach";
 const STATION_SOURCE = "reach-stations";
 const COMPLEX_SOURCE = "reach-complexes";
+const DONG_SOURCE = "reach-dongs";
 const CARTO = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -149,6 +150,24 @@ export class MapLibreAdapter implements MapAdapter {
     src?.setData(complexes);
   }
 
+  onDongClick(handler: (key: string) => void): void {
+    this.map.on("click", DONG_SOURCE, (e) => {
+      const f = e.features?.[0];
+      if (f) handler(String(f.properties?.key ?? ""));
+    });
+    this.map.on("mouseenter", DONG_SOURCE, () => {
+      this.map.getCanvas().style.cursor = "pointer";
+    });
+    this.map.on("mouseleave", DONG_SOURCE, () => {
+      this.map.getCanvas().style.cursor = "";
+    });
+  }
+
+  setDongs(dongs: GeoJSON.FeatureCollection): void {
+    const src = this.map.getSource(DONG_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    src?.setData(dongs);
+  }
+
   setOrigins(points: LngLat[]): void {
     for (const m of this.originMarkers) m.remove();
     this.originMarkers = points.map((at) =>
@@ -223,6 +242,9 @@ function installLayers(map: maplibregl.Map) {
   if (!map.getSource(BAND_SOURCE)) map.addSource(BAND_SOURCE, { type: "geojson", data: EMPTY });
   if (!map.getSource(STATION_SOURCE)) {
     map.addSource(STATION_SOURCE, { type: "geojson", data: EMPTY });
+  }
+  if (!map.getSource(DONG_SOURCE)) {
+    map.addSource(DONG_SOURCE, { type: "geojson", data: EMPTY });
   }
   if (!map.getSource(COMPLEX_SOURCE)) {
     map.addSource(COMPLEX_SOURCE, { type: "geojson", data: EMPTY });
@@ -309,6 +331,25 @@ function installLayers(map: maplibregl.Map) {
     },
     firstSymbol,
   );
+
+  // 동네 시세. 점이 아니라 글자라서 멀리서도 값을 바로 읽는다.
+  map.addLayer({
+    id: DONG_SOURCE,
+    type: "symbol",
+    source: DONG_SOURCE,
+    layout: {
+      "text-field": ["concat", ["get", "name"], "\n", ["get", "price"]],
+      "text-size": 11.5,
+      "text-line-height": 1.25,
+      "text-allow-overlap": false,
+      "text-padding": 6,
+    },
+    paint: {
+      "text-color": "#12467f",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 1.8,
+    },
+  });
 
   // 이름은 가까이 봤을 때만. 멀리서 다 띄우면 지도가 글자로 덮인다.
   map.addLayer(

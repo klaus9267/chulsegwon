@@ -98,12 +98,17 @@ object Geocode {
             val c = cache[node["aptSeq"].asText()] ?: continue
             val lon = c["lon"] as? Double ?: continue
             val lat = c["lat"] as? Double ?: continue
+            fun num(f: String) = node[f]?.takeIf { !it.isNull }?.asInt()
             out += mapOf(
                 "name" to node["name"].asText(),
                 "lon" to lon,
                 "lat" to lat,
-                "sale" to node["saleMedianManwon"]?.takeIf { !it.isNull }?.asInt(),
-                "jeonse" to node["jeonseMedianManwon"]?.takeIf { !it.isNull }?.asInt(),
+                "sale" to num("saleMedianManwon"),
+                "jeonse" to num("jeonseMedianManwon"),
+                // 자취 타겟은 월세가 실제 기준이다. 아파트 수집에서는 null 로 떨어진다.
+                "deposit" to num("wolseDepositManwon"),
+                "monthly" to num("wolseMonthlyManwon"),
+                "kind" to (node["kind"]?.asText() ?: "APT"),
                 "deals" to node["deals"].asInt(),
                 "buildYear" to node["buildYear"].asText(),
             )

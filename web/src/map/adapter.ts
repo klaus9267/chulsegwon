@@ -46,6 +46,15 @@ export interface MapAdapter {
   onStationClick(handler: (stationIndex: number) => void): void;
   /** 도달권 안 아파트 단지. 없으면 빈 컬렉션을 준다. */
   setComplexes(complexes: GeoJSON.FeatureCollection): void;
+  /**
+   * 도달권 안 동네 시세 라벨.
+   *
+   * 점이 아니라 **글자**인 게 중요하다. 자취하는 사람이 지도에서 알고 싶은 건
+   * "여기 건물이 있다"가 아니라 "이 동네가 얼마다"라서, 값을 직접 읽혀야 한다.
+   */
+  setDongs(dongs: GeoJSON.FeatureCollection): void;
+  /** 동 라벨을 눌렀을 때. 그 동네를 자세히 보여주기 위한 것. */
+  onDongClick(handler: (key: string) => void): void;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */
