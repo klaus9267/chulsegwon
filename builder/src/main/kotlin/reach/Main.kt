@@ -22,6 +22,21 @@ fun main(args: Array<String>) {
     val transferOverhead = (opts["--transfer-overhead-sec"] ?: "90").toInt()
     val originLimit = (opts["--origins"] ?: "0").toInt()   // 0 = 전부. 실측용.
 
+    if (opts["--mode"] == "deals") {
+        // 키는 인자로 받지 않는다. 셸 히스토리와 프로세스 목록에 남기 때문이다.
+        val key = System.getenv("DATA_GO_KR_KEY")
+            ?: File(".env").takeIf { it.exists() }?.readLines()
+                ?.firstOrNull { it.startsWith("DATA_GO_KR_KEY=") }?.substringAfter("=")
+            ?: error("DATA_GO_KR_KEY 가 없다 (.env 또는 환경변수)")
+        Deals.run(
+            key = key.trim(),
+            months = (opts["--months"] ?: "12").toInt(),
+            outDir = File(opts["--out"] ?: "data/raw/deals"),
+            sggFilter = opts["--sgg"]?.split(","),
+        )
+        return
+    }
+
     require(gml.exists()) { "GML 이 없다: ${gml.absolutePath}" }
 
     println("[1/5] 그래프 로드: ${gml.name}")

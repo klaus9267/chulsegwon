@@ -17,3 +17,6 @@ web/idx*.html
 # 키는 커밋하지 않는다
 .env
 .env.local
+
+# 수집 데이터 (생성물)
+data/raw/deals/
