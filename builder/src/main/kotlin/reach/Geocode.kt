@@ -98,11 +98,16 @@ object Geocode {
             val c = cache[node["aptSeq"].asText()] ?: continue
             val lon = c["lon"] as? Double ?: continue
             val lat = c["lat"] as? Double ?: continue
+            // 단독·다가구는 지번이 없어 "동 전체"가 한 점으로 뭉쳐 있다. 그 점을 건물처럼
+            // 찍으면 동 레이어와 같은 정보를 두 번, 그것도 틀린 위치에 보여주는 셈이다.
+            if (node["kind"]?.asText() == "HOUSE") continue
+
             fun num(f: String) = node[f]?.takeIf { !it.isNull }?.asInt()
             out += mapOf(
                 "name" to node["name"].asText(),
-                "lon" to lon,
-                "lat" to lat,
+                // 소수 5자리면 약 1m. 그 이상은 파일만 키운다(6만 건이라 차이가 크다).
+                "lon" to Math.round(lon * 1e5) / 1e5,
+                "lat" to Math.round(lat * 1e5) / 1e5,
                 "sale" to num("saleMedianManwon"),
                 "jeonse" to num("jeonseMedianManwon"),
                 // 자취 타겟은 월세가 실제 기준이다. 아파트 수집에서는 null 로 떨어진다.
@@ -111,6 +116,8 @@ object Geocode {
                 "kind" to (node["kind"]?.asText() ?: "APT"),
                 "deals" to node["deals"].asInt(),
                 "buildYear" to node["buildYear"].asText(),
+                // 방 종류별 시세. 아파트 수집에는 없어서 그때는 빠진다.
+                "rooms" to node["rooms"],
             )
         }
         outFile.parentFile?.mkdirs()

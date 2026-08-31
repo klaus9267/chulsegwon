@@ -173,14 +173,28 @@ object Deals {
         return null
     }
 
+    /**
+     * XML 한 태그의 값.
+     *
+     * 정규식이나 파서를 쓰지 않는 이유는 응답이 단순하고 건수가 많아서다(33만 건).
+     * 대신 **엔티티는 반드시 풀어야 한다.** 그러지 않으면 "T&amp;PC서초" 같은 이름이
+     * 그대로 굳어서 화면까지 따라간다. 실제로 그렇게 나왔다.
+     */
     private fun tag(xml: String, from: Int, end: Int, name: String): String {
         val open = "<$name>"
         val s = xml.indexOf(open, from)
         if (s < 0 || s > end) return ""
         val e = xml.indexOf("</$name>", s)
         if (e < 0 || e > end) return ""
-        return xml.substring(s + open.length, e).trim()
+        return unescape(xml.substring(s + open.length, e).trim())
     }
+
+    /** XML 기본 엔티티 5종. 실거래가 응답에 실제로 나오는 건 대부분 `&amp;` 다. */
+    private fun unescape(v: String): String =
+        if (v.indexOf('&') < 0) v
+        else v.replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&apos;", "'")
+            .replace("&#39;", "'").replace("&amp;", "&")
 
     private fun parse(xml: String, kind: String, ym: String, sgg: String): List<Deal> {
         val out = ArrayList<Deal>()
@@ -259,8 +273,10 @@ object Deals {
                 "kind" to latest.kind,
                 "saleMedianManwon" to median(sale.map { it.amountManwon }),
                 "jeonseMedianManwon" to median(jeonse.map { it.amountManwon }),
-                "wolseDepositManwon" to median(wolse.map { it.amountManwon }),
-                "wolseMonthlyManwon" to median(wolse.map { it.monthlyManwon }),
+                // 동 집계와 같은 이유로 보증금·월세 중위값을 따로 뽑아 붙이지 않는다.
+                // 환산월세의 중위를 보증금 1,000만원 기준으로 되돌린다.
+                "wolseDepositManwon" to wolseAtBase(wolse)?.let { BASE_DEPOSIT },
+                "wolseMonthlyManwon" to wolseAtBase(wolse),
                 "areaMinM2" to group.mapNotNull { it.areaM2.takeIf { a -> a > 0 } }.minOrNull(),
                 "areaMaxM2" to group.mapNotNull { it.areaM2.takeIf { a -> a > 0 } }.maxOrNull(),
             )
@@ -280,42 +296,101 @@ object Deals {
      * 원자료를 남겨둔 이유가 이것이다.
      */
     fun reaggregate(rawFiles: List<File>, outDir: File) {
+        writeDongs(loadRaw(rawFiles), outDir)
+    }
+
+    /**
+     * 이미 만들어 둔 **건물** 집계의 시세만 원자료로 다시 계산해 덮는다.
+     *
+     * 주소·건축년도는 원자료에 없어서 새로 만들 수 없다. 대신 그 값들은 바뀌지 않으므로
+     * 기존 파일을 살려 두고 가격 필드만 갈아 끼운다. 45분짜리 재수집을 피하는 방법이다.
+     */
+    fun repriceComplexes(rawFiles: List<File>, complexFile: File) {
+        require(complexFile.exists()) { "건물 집계가 없다: ${complexFile.absolutePath}" }
+        val mapper = ObjectMapper().registerKotlinModule()
+        val bySeq = loadRaw(rawFiles).groupBy { it.aptSeq }
+
+        val root = mapper.readTree(complexFile)
+        val arr = root["complexes"] as com.fasterxml.jackson.databind.node.ArrayNode
+        var patched = 0
+        var missing = 0
+        for (node in arr) {
+            val obj = node as com.fasterxml.jackson.databind.node.ObjectNode
+            val group = bySeq[obj["aptSeq"].asText()]
+            if (group == null) { missing++; continue }
+            val monthly = wolseAtBase(group.filter { it.monthlyManwon > 0 })
+            if (monthly == null) {
+                obj.putNull("wolseDepositManwon"); obj.putNull("wolseMonthlyManwon")
+            } else {
+                obj.put("wolseDepositManwon", BASE_DEPOSIT)
+                obj.put("wolseMonthlyManwon", monthly)
+            }
+            val j = group.filter { it.monthlyManwon == 0 && it.kind != "APT_TRADE" }
+                .map { it.amountManwon }.filter { it > 0 }.sorted()
+            if (j.isEmpty()) obj.putNull("jeonseMedianManwon")
+            else obj.put("jeonseMedianManwon", j[j.size / 2])
+            obj.put("deals", group.size)
+
+            // 한 건물에도 원룸과 쓰리룸이 섞여 있다. 원룸을 찾는 사람에게 그 건물의
+            // 쓰리룸 값을 보여주면 화면 전체가 거짓이 된다. 동 집계와 같은 구간으로
+            // 나눠 담고, 어떤 구간을 볼지는 화면이 정한다.
+            val rooms = obj.putObject("rooms")
+            for (rt in listOf("ONE", "TWO", "THREE")) {
+                val bucket = group.filter { roomType(it.areaM2) == rt }
+                if (bucket.isEmpty()) continue
+                val o = rooms.putObject(rt)
+                o.put("n", bucket.size)
+                val m = wolseAtBase(bucket.filter { it.monthlyManwon > 0 })
+                if (m == null) o.putNull("m") else o.put("m", m)
+                val jj = bucket.filter { it.monthlyManwon == 0 }
+                    .map { it.amountManwon }.filter { it > 0 }.sorted()
+                if (jj.isEmpty()) o.putNull("j") else o.put("j", jj[jj.size / 2])
+            }
+            patched++
+        }
+        mapper.writeValue(complexFile, root)
+        println("      건물 $patched 곳 시세 갱신 (원자료에 없는 곳 $missing)")
+    }
+
+    /**
+     * 원자료 JSONL 을 읽는다. 여러 파일을 합칠 수 있어야 한다 — data.go.kr 은 API 별로
+     * 일일 한도가 따로 걸려서, 한 종류만 나중에 다시 받아 붙이는 일이 생긴다.
+     *
+     * ⚠️ 파일 **안에서는** 중복을 지우면 안 된다. 같은 오피스텔에서 같은 달에 같은
+     * 면적·같은 가격 계약이 여러 건 나오는 건 흔하고, 오히려 그게 그 동네의 대표
+     * 가격이다. 지우면 중위값이 정확히 가장 흔한 구간에서 깎인다(실제로 46,388건이
+     * 사라졌다). 파일 사이에서만 거른다.
+     */
+    private fun loadRaw(rawFiles: List<File>): List<Deal> {
         val mapper = ObjectMapper().registerKotlinModule()
         val deals = ArrayList<Deal>(400_000)
-        // 원자료를 여러 파일에서 합칠 수 있어야 한다. data.go.kr 은 API 별로 일일
-        // 한도가 따로 걸려서, 한 종류만 나중에 다시 받아 붙이는 일이 생긴다.
-        // ⚠️ 파일 **안에서는** 중복을 지우면 안 된다. 같은 오피스텔에서 같은 달에
-        // 같은 면적·같은 가격 계약이 여러 건 나오는 건 흔한 일이고, 오히려 그게 그
-        // 동네의 대표 가격이다. 그걸 지우면 중위값이 정확히 가장 흔한 구간에서
-        // 깎여 나간다(실제로 46,388건이 사라졌다). 파일 사이에서만 거른다.
         val seenBefore = HashSet<String>()
         for (rawFile in rawFiles) {
             require(rawFile.exists()) { "원자료가 없다: ${rawFile.absolutePath}" }
             val thisFile = HashSet<String>()
             var dup = 0
             rawFile.bufferedReader(Charsets.UTF_8).useLines { lines ->
-            for (line in lines) {
-                if (line.isBlank()) continue
-                val n = mapper.readTree(line)
-                // 같은 거래가 두 파일에 들어 있으면 중위값이 그쪽으로 기운다.
-                val id = "${n["seq"].asText()}|${n["ym"].asText()}|${n["area"].asDouble()}|" +
-                    "${n["amt"].asInt()}|${n["mon"].asInt()}"
-                thisFile += id
-                if (id in seenBefore) { dup++; continue }
-                deals += Deal(
-                    aptSeq = n["seq"].asText(), name = n["name"].asText(),
-                    sggCd = n["sgg"].asText(), umdNm = n["umd"].asText(),
-                    jibun = "", roadNm = "", roadBonbun = "", roadBubun = "", buildYear = "",
-                    areaM2 = n["area"].asDouble(),
-                    amountManwon = n["amt"].asInt(), monthlyManwon = n["mon"].asInt(),
-                    kind = n["kind"].asText(), yearMonth = n["ym"].asText(),
-                )
-            }
+                for (line in lines) {
+                    if (line.isBlank()) continue
+                    val n = mapper.readTree(line)
+                    val id = "${n["seq"].asText()}|${n["ym"].asText()}|${n["area"].asDouble()}|" +
+                        "${n["amt"].asInt()}|${n["mon"].asInt()}"
+                    thisFile += id
+                    if (id in seenBefore) { dup++; continue }
+                    deals += Deal(
+                        aptSeq = n["seq"].asText(), name = n["name"].asText(),
+                        sggCd = n["sgg"].asText(), umdNm = n["umd"].asText(),
+                        jibun = "", roadNm = "", roadBonbun = "", roadBubun = "", buildYear = "",
+                        areaM2 = n["area"].asDouble(),
+                        amountManwon = n["amt"].asInt(), monthlyManwon = n["mon"].asInt(),
+                        kind = n["kind"].asText(), yearMonth = n["ym"].asText(),
+                    )
+                }
             }
             seenBefore += thisFile
             println("      ${rawFile.name}: 누적 ${"%,d".format(deals.size)}건 (앞 파일과 중복 $dup 제외)")
         }
-        writeDongs(deals, outDir)
+        return deals
     }
 
     /** 거래 원자료를 JSONL 로. 한 줄 한 건이라 스트리밍으로 다시 읽을 수 있다. */
@@ -364,6 +439,19 @@ object Deals {
      */
     private fun convertedRent(d: Deal): Double =
         d.monthlyManwon + d.amountManwon * RATE / 12.0
+
+    /**
+     * 환산월세 중위를 보증금 1,000만원 기준 월세로 되돌린 값(만원). 월세 거래가 없으면 null.
+     *
+     * 건물이든 동이든 같은 계산을 쓴다. 기준이 다르면 확대했을 때 숫자가 튀어서,
+     * 같은 곳을 보는데 값이 달라지는 것처럼 읽힌다.
+     */
+    private fun wolseAtBase(wolse: List<Deal>): Int? {
+        if (wolse.isEmpty()) return null
+        val conv = wolse.map { convertedRent(it) }.sorted()
+        val mid = conv[conv.size / 2]
+        return Math.round(mid - BASE_DEPOSIT * RATE / 12.0).toInt().coerceAtLeast(1)
+    }
 
     /** 전월세전환율. 수도권 연 5.5% 안팎. */
     private const val RATE = 0.055

@@ -72,6 +72,21 @@ function nextFrame(timeoutMs = 60): Promise<void> {
   });
 }
 
+/**
+ * 이 배율부터는 개별 건물을 보여준다.
+ *
+ * 카카오 level 4 는 화면 폭이 대략 1~2km 다. 동 하나가 통째로 화면이라 "이 동네
+ * 평균"은 더 이상 답이 아니고, 어느 골목인지가 질문이 된다.
+ */
+const BUILDING_MAX_LEVEL = 4;
+
+/** 건물 이름은 실거래 자료에서 온다. 그대로 innerHTML 에 넣지 않는다. */
+function escapeHtml(v: string): string {
+  return v.replace(/[&<>"]/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
+  );
+}
+
 function zoomToLevel(zoom: number): number {
   return Math.max(1, Math.min(14, Math.round(21 - zoom)));
 }
@@ -121,11 +136,13 @@ export class KakaoAdapter implements MapAdapter {
   private originMarkers: KakaoOverlay[] = [];
 
   /** 컨테이너 크기가 0 이라 미뤄둔 화면 맞추기. 크기가 생기면 실행한다. */
-  private pendingFit: { bounds: Bounds; padding: Padding } | null = null;
+  pendingFit: { bounds: Bounds; padding: Padding } | null = null;
 
   private dongFeatures: GeoJSON.Feature[] = [];
   private dongOverlays: KakaoOverlay[] = [];
   private dongClick?: (key: string) => void;
+  private zoomHandler?: (level: number) => void;
+  private buildingFeatures: GeoJSON.Feature[] = [];
 
   private constructor(
     private readonly ns: KakaoNS,
@@ -167,9 +184,22 @@ export class KakaoAdapter implements MapAdapter {
     // 접히기만 해도 지도 절반이 회색으로 남는다.
     // 배율이 바뀌면 무엇을 보여줄지가 달라진다. 멀리서 역 점 수백 개는 잡음이고,
     // 가까이서 동 이름만 있으면 정보가 부족하다.
-    ns.maps.event.addListener(map, "zoom_changed", () => adapter.applyTier());
+    ns.maps.event.addListener(map, "zoom_changed", () => {
+      adapter.applyTier();
+      adapter.zoomHandler?.(map.getLevel());
+    });
     // 보이는 범위를 기준으로 라벨을 솎으므로, 이동해도 다시 뽑아야 한다.
-    ns.maps.event.addListener(map, "dragend", () => adapter.renderDongs());
+    // 크기가 늦게 잡혀 미뤄둔 화면 맞추기가 남아 있는데 사용자가 지도를 끌었다면,
+    // 그 맞추기는 이제 방해다. 보던 곳에서 끌려가는 것보다 낫다.
+    //
+    // 확대·축소는 취소 사유로 삼지 않는다. 아직 한 번도 맞춰지지 않은 지도를 확대하면
+    // 엉뚱한 곳이 확대될 뿐이라, 그때는 맞추기가 남아 있는 편이 낫다.
+    ns.maps.event.addListener(map, "dragstart", () => { adapter.pendingFit = null; });
+
+    ns.maps.event.addListener(map, "dragend", () => {
+      adapter.renderDongs();
+      adapter.renderBuildings();
+    });
 
     if (typeof ResizeObserver !== "undefined") {
       new ResizeObserver(() => adapter.onResized()).observe(container);
@@ -276,15 +306,40 @@ export class KakaoAdapter implements MapAdapter {
    * DOM 오버레이라 개수 상한이 필요하다 — 거래가 많은 순으로 잘린다.
    */
   setComplexes(complexes: GeoJSON.FeatureCollection): void {
+    this.buildingFeatures = complexes.features;
+    this.renderBuildings();
+  }
+
+  /**
+   * 개별 건물의 실거래.
+   *
+   * 동 라벨과 같은 방식으로 솎는다. 다만 여기서는 **거래 건수**가 우선순위다.
+   * 6개월간 한 번 거래된 집이 전체의 절반이 넘어서, 그냥 두면 화면이 우연히
+   * 한 번 팔린 집들로 채워진다. 많이 거래된 건물이 그 골목을 더 잘 대표한다.
+   */
+  renderBuildings(): void {
     for (const o of this.complexOverlays) o.setMap(null);
     this.complexOverlays = [];
-    const MAX = 400;
-    for (const f of complexes.features.slice(0, MAX)) {
+    if (this.map.getLevel() > BUILDING_MAX_LEVEL) return;
+    if (this.buildingFeatures.length === 0) return;
+
+    const shown = this.thin(this.buildingFeatures, 126, 54, 40);
+    for (const f of shown) {
       const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;
-      const p = f.properties as { name: string; jeonse: number | null };
+      const p = f.properties as {
+        name: string; price: string; kind: string; deals: number;
+      };
       const el = document.createElement("div");
-      el.className = "cdot";
-      el.dataset.name = p.name + (p.jeonse ? " · 전세 " + (p.jeonse / 10000).toFixed(1) + "억" : "");
+      el.className = "blabel";
+      el.innerHTML =
+        "<b>" + escapeHtml(p.name) + "</b><span>" + p.price + "</span>";
+      // 거래 한 건짜리를 시세처럼 읽으면 안 된다. 건수를 붙여 스스로 판단하게 한다.
+      // 브라우저 기본 툴팁은 1초 뒤에야 뜨고 생김새도 제각각이라 직접 그린다.
+      el.dataset.info =
+        p.kind + " · 최근 6개월 " + p.deals + "건" +
+        (p.deals <= 2 ? " (시세로 보기엔 적음)" : "");
+      if (p.deals <= 2) el.classList.add("blabel-thin");
+
       const overlay = new this.ns.maps.CustomOverlay({
         position: new this.ns.maps.LatLng(lat, lon),
         content: el,
@@ -295,7 +350,10 @@ export class KakaoAdapter implements MapAdapter {
       overlay.setMap(this.map);
       this.complexOverlays.push(overlay);
     }
-    this.applyTier();
+  }
+
+  onZoom(handler: (level: number) => void): void {
+    this.zoomHandler = handler;
   }
 
   setDongs(dongs: GeoJSON.FeatureCollection): void {
@@ -319,10 +377,63 @@ export class KakaoAdapter implements MapAdapter {
     // 동 라벨이 보이는 배율에서는 역 점이 라벨과 무게를 다툰다. 라벨이 사라지는
     // 지점부터 역을 켠다.
     const showStations = level <= 6;
-    const showComplexes = level <= 5;
     for (const o of this.stationOverlays) o.setMap(showStations ? this.map : null);
-    for (const o of this.complexOverlays) o.setMap(showComplexes ? this.map : null);
     this.renderDongs();
+    this.renderBuildings();
+  }
+
+  /**
+   * 화면에 얹을 것만 골라낸다.
+   *
+   * 배율과 화면 크기를 따로 추정하지 않는다. **지금 보이는 범위**를 라벨 하나가
+   * 차지하는 크기로 나누면 둘이 한 번에 반영된다. 배율 공식은 카카오가 축척을
+   * 바꾸면 틀리지만, 이 방식은 화면이 실제로 어떻든 스스로 맞는다.
+   *
+   * 격자에 담아 칸마다 하나씩 남기면 칸 경계 바로 양옆에 있는 둘은 여전히 붙는다.
+   * 그래서 중요한 것부터 놓되, 이미 놓은 것과 한 칸 이상 떨어졌을 때만 받는다.
+   * 최소 간격이 보장되고 밀도가 높은 곳에서는 대표성이 큰 것이 남는다.
+   *
+   * 입력은 이미 중요도 순으로 정렬돼 있다고 본다(동은 거래량, 건물은 거래 건수).
+   */
+  private thin(
+    features: GeoJSON.Feature[],
+    labelW: number,
+    labelH: number,
+    max: number,
+  ): GeoJSON.Feature[] {
+    const b = this.map.getBounds();
+    const sw = b.getSouthWest();
+    const ne = b.getNorthEast();
+    const spanLon = Math.abs(ne.getLng() - sw.getLng()) || 0.4;
+    const spanLat = Math.abs(ne.getLat() - sw.getLat()) || 0.3;
+    const w = this.container.clientWidth || 800;
+    const h = this.container.clientHeight || 600;
+    const narrow = w < 640;
+    const scale = narrow ? 0.78 : 1;
+    const cols = Math.max(2, Math.floor(w / (labelW * scale)));
+    const rows = Math.max(2, Math.floor(h / (labelH * scale)));
+    const cellLon = spanLon / cols;
+    const cellLat = spanLat / rows;
+    const cap = narrow ? Math.round(max * 0.4) : max;
+
+    const shown: GeoJSON.Feature[] = [];
+    for (const f of features) {
+      if (shown.length >= cap) break;
+      const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;
+      if (lon < sw.getLng() || lon > ne.getLng() || lat < sw.getLat() || lat > ne.getLat()) {
+        continue;
+      }
+      let clear = true;
+      for (const g of shown) {
+        const [gl, ga] = (g.geometry as GeoJSON.Point).coordinates;
+        if (Math.abs(gl - lon) < cellLon && Math.abs(ga - lat) < cellLat) {
+          clear = false;
+          break;
+        }
+      }
+      if (clear) shown.push(f);
+    }
+    return shown;
   }
 
   /**
@@ -336,47 +447,9 @@ export class KakaoAdapter implements MapAdapter {
     for (const o of this.dongOverlays) o.setMap(null);
     this.dongOverlays = [];
     const level = this.map.getLevel();
-    if (level <= 4 || this.dongFeatures.length === 0) return;
+    if (level <= BUILDING_MAX_LEVEL || this.dongFeatures.length === 0) return;
 
-    // 배율과 화면 크기를 따로 추정하지 않는다. **지금 보이는 범위**를 라벨 하나가
-    // 차지하는 크기로 나누면 둘이 한 번에 반영된다. 배율 공식은 카카오가 축척을
-    // 바꾸면 틀리지만, 이 방식은 화면이 실제로 어떻든 스스로 맞는다.
-    const b = this.map.getBounds();
-    const sw = b.getSouthWest();
-    const ne = b.getNorthEast();
-    const spanLon = Math.abs(ne.getLng() - sw.getLng()) || 0.4;
-    const spanLat = Math.abs(ne.getLat() - sw.getLat()) || 0.3;
-    const w = this.container.clientWidth || 800;
-    const h = this.container.clientHeight || 600;
-    // 라벨 크기는 화면 폭에 따라 다르다(좁으면 CSS 로 줄인다). 간격도 같이 줄인다.
-    const narrow = w < 640;
-    const cols = Math.max(2, Math.floor(w / (narrow ? 74 : 96)));
-    const rows = Math.max(2, Math.floor(h / (narrow ? 48 : 58)));
-    const cellLon = spanLon / cols;
-    const cellLat = spanLat / rows;
-
-    // 격자에 담아 칸마다 하나씩 남기면 칸 경계 바로 양옆에 있는 둘은 여전히 붙는다.
-    // 거래가 많은 동부터 놓되, 이미 놓은 라벨과 한 칸 이상 떨어졌을 때만 받는다.
-    // 최소 간격이 보장되고, 밀도가 높은 곳에서는 대표성이 큰 동이 남는다.
-    const MAX_LABELS = this.container.clientWidth < 640 ? 18 : 48;
-    const byN = [...this.dongFeatures].sort(
-      (a, b) => Number((b.properties as { n: number }).n) - Number((a.properties as { n: number }).n),
-    );
-    const shown: GeoJSON.Feature[] = [];
-    for (const f of byN) {
-      if (shown.length >= MAX_LABELS) break;
-      const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;
-      if (lon < sw.getLng() || lon > ne.getLng() || lat < sw.getLat() || lat > ne.getLat()) continue;
-      let clear = true;
-      for (const g of shown) {
-        const [gl, ga] = (g.geometry as GeoJSON.Point).coordinates;
-        if (Math.abs(gl - lon) < cellLon && Math.abs(ga - lat) < cellLat) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) shown.push(f);
-    }
+    const shown = this.thin(this.dongFeatures, 96, 58, 48);
 
     for (const f of shown) {
       const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates;

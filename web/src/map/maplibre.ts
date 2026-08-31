@@ -163,6 +163,11 @@ export class MapLibreAdapter implements MapAdapter {
     });
   }
 
+  onZoom(handler: (level: number) => void): void {
+    // 카카오 level 로 환산해 넘긴다. 바깥에서 지도 구현을 알 이유가 없다.
+    this.map.on("zoomend", () => handler(Math.max(1, Math.round(21 - this.map.getZoom()))));
+  }
+
   setDongs(dongs: GeoJSON.FeatureCollection): void {
     const src = this.map.getSource(DONG_SOURCE) as maplibregl.GeoJSONSource | undefined;
     src?.setData(dongs);

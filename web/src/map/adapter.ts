@@ -55,6 +55,12 @@ export interface MapAdapter {
   setDongs(dongs: GeoJSON.FeatureCollection): void;
   /** 동 라벨을 눌렀을 때. 그 동네를 자세히 보여주기 위한 것. */
   onDongClick(handler: (key: string) => void): void;
+  /**
+   * 배율이 바뀌었을 때.
+   *
+   * 어떤 데이터는 확대해야 비로소 필요해진다. 그때 받으면 처음 화면이 가벼워진다.
+   */
+  onZoom(handler: (level: number) => void): void;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */

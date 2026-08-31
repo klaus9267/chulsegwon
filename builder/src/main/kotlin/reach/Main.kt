@@ -22,6 +22,15 @@ fun main(args: Array<String>) {
     val transferOverhead = (opts["--transfer-overhead-sec"] ?: "90").toInt()
     val originLimit = (opts["--origins"] ?: "0").toInt()   // 0 = 전부. 실측용.
 
+    if (opts["--mode"] == "reprice") {
+        Deals.repriceComplexes(
+            rawFiles = (opts["--in"] ?: "data/raw/rent/deals-raw.jsonl")
+                .split(",").map { File(it.trim()) },
+            complexFile = File(opts["--complexes"] ?: "data/raw/rent/complexes-raw.json"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "reagg") {
         Deals.reaggregate(
             rawFiles = (opts["--in"] ?: "data/raw/rent/deals-raw.jsonl")

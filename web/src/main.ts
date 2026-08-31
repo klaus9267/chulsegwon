@@ -2,8 +2,9 @@ import { StationMatrixProvider } from "./provider";
 import { buildField, buildStationGeoJSON } from "./grid";
 import { buildIsobandsGeoJSON, breaksFor } from "./contour";
 import { createCombobox } from "./combobox";
-import { buildComplexGeoJSON, filterComplexes, formatManwon, loadComplexes } from "./complexes";
-import type { ComplexMeta } from "./complexes";
+import { formatManwon } from "./complexes";
+import { buildRentalGeoJSON, filterRentals, loadRentals } from "./rentals";
+import type { Rental } from "./rentals";
 import { AMENITIES, amenityRanks, loadAmenities, passes, thresholds } from "./amenities";
 import type { AmenityMap } from "./amenities";
 import { copyText, decodeState, encodeState } from "./share";
@@ -24,6 +25,18 @@ import type { Direction, Manifest } from "./types";
 const CELL_METERS = 200;
 
 /** 처음 열었을 때 보일 범위. 서울 시가지가 들어와야 어디를 보고 있는지 안다. */
+/** 이 배율부터 개별 건물을 보여준다. 지도 어댑터의 값과 맞춰 둔다. */
+const BUILDING_LEVEL = 4;
+
+/**
+ * 건물 데이터를 미리 받기 시작하는 배율.
+ *
+ * 보여줄 배율에 도달해서야 받기 시작하면 12MB 를 기다리는 몇 초 동안 빈 지도를 본다.
+ * 두 단계 먼저 시작하면 도착했을 때 이미 준비돼 있다. 확대는 대개 연속 동작이라
+ * 이 정도 예측은 거의 맞는다.
+ */
+const BUILDING_PREFETCH_LEVEL = BUILDING_LEVEL + 2;
+
 const SEOUL_BOUNDS: Bounds = { west: 126.76, south: 37.42, east: 127.19, north: 37.7 };
 
 /** 짧을수록 진하게. */
@@ -145,12 +158,22 @@ async function main() {
   const capStep = () => (state.tenure === "WOLSE" ? 5 : 2000);
   const capValue = (tick: number) => (tick === 0 ? 0 : tick * capStep());
 
-  // 단지 데이터는 부가 기능이다. 없어도 도달권은 그대로 동작해야 한다.
-  let complexes: ComplexMeta[] = [];
-  void loadComplexes(import.meta.env.BASE_URL + "data/").then((list) => {
-    complexes = list;
-    if (list.length > 0) void render();
-  });
+  /**
+   * 개별 건물 실거래. 확대했을 때만 쓰이므로 그때 받는다.
+   *
+   * 12MB 다. 동네를 고르다 마는 사람에게 처음부터 물릴 이유가 없고, 광역 배율에서는
+   * 화면에 그릴 수도 없다. 한 번 받으면 메모리에 남아 확대·축소를 오가도 다시 받지 않는다.
+   */
+  let rentals: Rental[] = [];
+  let rentalsRequested = false;
+  function ensureRentals(level: number) {
+    if (rentalsRequested || level > BUILDING_PREFETCH_LEVEL) return;
+    rentalsRequested = true;
+    void loadRentals(import.meta.env.BASE_URL + "data/").then((list) => {
+      rentals = list;
+      if (list.length > 0) void render();
+    });
+  }
 
   let amenityData: AmenityMap = {};
   let amenityTh: Record<string, number> = {};
@@ -358,6 +381,9 @@ async function main() {
 
   // 지도에서 역을 눌러 직장을 바꾼다. 콤보박스로 이름을 치는 것보다,
   // 도달권을 보다가 "여기서 다니면 어떻지?" 하고 바로 눌러보는 흐름이 자연스럽다.
+  // 확대하면 개별 건물이 필요해진다. 그 시점에 받는다.
+  map.onZoom((level) => ensureRentals(level));
+
   map.onDongClick((key) => {
     openDong = key;
     showDetail(key);
@@ -735,14 +761,15 @@ async function main() {
     map.setStations(buildStationGeoJSON(meta.stations, within));
 
     // 도달권 안 + 예산 이내. 폴리곤 검사 없이 스칼라 필드를 찍어보면 O(1) 이다.
-    const picked = field
-      ? filterComplexes(complexes, field, {
-          // 단지(아파트)는 전세 기록만 있다. 월세로 보는 중이면 예산을 걸지 않는다.
-          maxJeonseManwon: state.tenure === "JEONSE" ? state.cap : 0,
+    const buildings = field
+      ? filterRentals(rentals, field, {
+          room: state.room,
+          tenure: state.tenure,
+          cap: state.cap,
           budgetMinutes: state.budget,
         })
       : [];
-    map.setComplexes(buildComplexGeoJSON(picked));
+    map.setComplexes(buildRentalGeoJSON(buildings, state.tenure));
 
     const dongPicks = (
       field
