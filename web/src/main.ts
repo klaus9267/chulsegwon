@@ -9,7 +9,10 @@ import type { Rental } from "./rentals";
 import { AMENITIES, amenityRanks, loadAmenities, passes, thresholds } from "./amenities";
 import type { AmenityMap } from "./amenities";
 import { copyText, decodeState, encodeState } from "./share";
-import { ROOM_LABEL, buildDongGeoJSON, dongKey, filterDongs, loadDongs } from "./dongs";
+import {
+  FLAT_CLIMB_M, ROOM_LABEL, TREND_MONTHS,
+  buildDongGeoJSON, dongKey, filterDongs, loadDongs,
+} from "./dongs";
 import { priceLabel } from "./dongs";
 import type { Dong, DongPick, RoomStat, RoomType, Tenure } from "./dongs";
 import { colorFor } from "./map/adapter";
@@ -159,6 +162,10 @@ async function main() {
     cap: 0,
     /** 켜둔 편의시설 조건. 비어 있으면 안 거른다. */
     amenities: new Set<string>(),
+    /** 역에서 오르막이 심한 동네를 뺄지. */
+    flatOnly: false,
+    /** 나란히 비교할 동네. 셋을 넘으면 화면에서 읽히지 않는다. */
+    compare: [] as string[],
     /** 추천 목록 정렬. 점수를 하나로 합치지 않는 이유는 가중치가 임의라서다. */
     sort: "commute" as "commute" | "price" | "amenity",
   };
@@ -558,6 +565,18 @@ async function main() {
   function buildAmenityChips() {
     const box = $("amenityChips");
     box.innerHTML = "";
+
+    // 지형은 편의시설과 성격이 다르지만 사용자에겐 같은 "조건"이라 나란히 둔다.
+    const flat = document.createElement("button");
+    flat.type = "button";
+    flat.setAttribute("aria-pressed", String(state.flatOnly));
+    flat.textContent = "평지 (오르막 " + FLAT_CLIMB_M + "m 이하)";
+    flat.addEventListener("click", () => {
+      state.flatOnly = !state.flatOnly;
+      flat.setAttribute("aria-pressed", String(state.flatOnly));
+      onInputChanged();
+    });
+    box.appendChild(flat);
     for (const a of AMENITIES) {
       const b = document.createElement("button");
       b.type = "button";
@@ -618,6 +637,168 @@ async function main() {
       .join("");
   }
 
+  /**
+   * 동네 비교.
+   *
+   * 고르는 일의 마지막은 결국 몇 개를 나란히 놓고 보는 것이다. 지금까지는 카드를
+   * 하나씩 열었다 닫았다 하며 머리로 기억해야 했는데, 그건 사람이 할 일이 아니다.
+   *
+   * 단지 비교는 다른 서비스도 하지만 **동네 비교**는 잘 없다. 매물 단위로 보는
+   * 서비스에게 동네는 필터일 뿐 비교 대상이 아니어서다. 우리는 동네를 정해주는
+   * 도구라 여기가 자연스러운 종착점이다.
+   */
+  function renderCompare() {
+    const box = $("compare");
+    if (state.compare.length === 0) {
+      box.hidden = true;
+      return;
+    }
+    const picked = state.compare
+      .map((k) => dongByKey.get(k))
+      .filter((d): d is Dong => d !== undefined);
+    if (picked.length === 0) {
+      box.hidden = true;
+      return;
+    }
+
+    // 줄마다 "작을수록 좋은가"가 다르다. 통근·월세·오르막은 작을수록, 편의점은 클수록.
+    type Row = { label: string; lower: boolean; get: (d: Dong) => number | null; fmt: (v: number) => string };
+    const rows: Row[] = [
+      {
+        label: "통근", lower: true,
+        get: (d) => dongMinutes.get(dongKey(d)) ?? null,
+        fmt: (v) => v + "분",
+      },
+      {
+        label: ROOM_LABEL[state.room], lower: true,
+        get: (d) => {
+          const r = d.rooms[state.room];
+          if (!r) return null;
+          return state.tenure === "JEONSE" ? r.jeonse : r.monthly;
+        },
+        fmt: (v) => (state.tenure === "JEONSE" ? formatManwon(v) : "월 " + v),
+      },
+      {
+        label: "오르막", lower: true,
+        get: (d) => d.climb ?? null,
+        fmt: (v) => (v > 0 ? "+" : "") + v + "m",
+      },
+      {
+        label: "편의점", lower: false,
+        get: (d) => amenityData[dongKey(d)]?.CS2 ?? null,
+        fmt: (v) => v + "곳",
+      },
+    ];
+
+    const head =
+      "<tr><th>비교</th>" +
+      picked.map((d) => `<th>${d.name}<button class="drop" data-k="${dongKey(d)}" ` +
+        `aria-label="${d.name} 빼기">✕</button></th>`).join("") +
+      "</tr>";
+
+    const body = rows
+      .map((r) => {
+        const vals = picked.map((d) => r.get(d));
+        const nums = vals.filter((v): v is number => v !== null);
+        const best = nums.length < 2 ? null : r.lower ? Math.min(...nums) : Math.max(...nums);
+        return (
+          `<tr><td>${r.label}</td>` +
+          vals
+            .map((v) =>
+              v === null
+                ? '<td class="none">–</td>'
+                : `<td class="${v === best ? "best" : ""}">${r.fmt(v)}</td>`,
+            )
+            .join("") +
+          "</tr>"
+        );
+      })
+      .join("");
+
+    box.innerHTML =
+      `<div class="chead"><span>동네 비교</span>` +
+      `<button class="clear" type="button">모두 지우기</button></div>` +
+      `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    box.hidden = false;
+
+    box.querySelector(".clear")?.addEventListener("click", () => {
+      state.compare = [];
+      renderCompare();
+      if (openDong) showDetail(openDong);
+    });
+    for (const b of box.querySelectorAll<HTMLElement>(".drop")) {
+      b.addEventListener("click", () => {
+        state.compare = state.compare.filter((k) => k !== b.dataset.k);
+        renderCompare();
+        if (openDong) showDetail(openDong);
+      });
+    }
+  }
+
+  /**
+   * 최근 6개월 월세 추이.
+   *
+   * 점마다 숫자를 붙이지 않는다 — 여섯 개를 다 적으면 선의 모양이 안 보인다.
+   * 처음과 끝만 적고 나머지는 형태로 읽힌다. 전세는 거래가 적어 월별로 쪼개면
+   * 표본이 무너지므로 월세일 때만 그린다.
+   */
+  function trendBlock(d: Dong): string {
+    if (state.tenure !== "WOLSE") return "";
+    const t = d.rooms[state.room]?.trend;
+    if (!t) return "";
+    const pts = t.map((v, i) => ({ v, i })).filter((p): p is { v: number; i: number } => p.v !== null);
+    if (pts.length < 3) return "";
+
+    const vals = pts.map((p) => p.v);
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const span = Math.max(1, hi - lo);
+    const W = 236;
+    const H = 34;
+    const n = Math.max(1, t.length - 1);
+    const xy = pts.map((p) => [
+      4 + (p.i / n) * (W - 8),
+      4 + (1 - (p.v - lo) / span) * (H - 8),
+    ]);
+    const path = xy.map(([x, y], i) => (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1)).join(" ");
+    const last = xy[xy.length - 1];
+    const first = pts[0].v;
+    const latest = pts[pts.length - 1].v;
+    const diff = latest - first;
+    const arrow = diff > 0 ? "▲" : diff < 0 ? "▼" : "–";
+    const from = TREND_MONTHS[pts[0].i];
+    const label = from ? from.slice(2, 4) + "." + from.slice(4) : "";
+
+    return (
+      `<div class="trend"><div class="thead">최근 추이` +
+      `<b class="${diff > 0 ? "up" : diff < 0 ? "down" : ""}">${arrow} ${diff > 0 ? "+" : ""}${diff}만</b></div>` +
+      `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" aria-hidden="true">` +
+      `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" ` +
+      `stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="var(--accent)"/></svg>` +
+      `<div class="tfoot"><span>${label} 월 ${first}</span><span>지금 월 ${latest}</span></div></div>`
+    );
+  }
+
+  /**
+   * 역에서 집까지의 오르막.
+   *
+   * 숫자만 적으면 +9m 가 큰지 작은지 알 수 없다. 사람이 아는 말로 옮긴다.
+   */
+  function climbLine(d: Dong): string {
+    if (d.climb === undefined || d.station === undefined) return "";
+    const c = d.climb;
+    const word =
+      c >= 40 ? "가파른 오르막" : c >= 20 ? "오르막" : c > FLAT_CLIMB_M ? "완만한 오르막" : "평지";
+    const sign = c > 0 ? "+" : "";
+    const walk = d.stationM === undefined ? "" : ` · ${d.stationM}m`;
+    return (
+      `<div class="terrain${c > FLAT_CLIMB_M ? " up" : ""}">` +
+      `${word} <b>${sign}${c}m</b>` +
+      `<span>${d.station}역 기준${walk}</span></div>`
+    );
+  }
+
   /** 상세 카드에 쓸 출발지 이름. 맞벌이면 둘 다 적는다. */
   function originLabel(): string {
     const a = meta.stations[state.origin].name;
@@ -665,9 +846,19 @@ async function main() {
       (minutes === undefined
         ? ""
         : `<div class="commute">${originLabel()} ${minutes}분</div>`) +
+      climbLine(d) +
       `<div class="unit">${state.tenure === "JEONSE" ? "전세 보증금" : "보증금 / 월세 (만원)"}</div>` +
+      trendBlock(d) +
       `<table>${rows}</table>` +
+      `<button class="pin" type="button">${state.compare.includes(key) ? "비교에서 빼기" : "+ 비교에 담기"}</button>` +
       `<a class="go" href="${naver}" target="_blank" rel="noopener">이 동네 매물 보기 →</a>`;
+    el.querySelector(".pin")?.addEventListener("click", () => {
+      const i = state.compare.indexOf(key);
+      if (i >= 0) state.compare.splice(i, 1);
+      else if (state.compare.length < 3) state.compare.push(key);
+      showDetail(key);
+      renderCompare();
+    });
     el.hidden = false;
     el.querySelector(".close")?.addEventListener("click", () => {
       openDong = null;
@@ -845,11 +1036,13 @@ async function main() {
             tenure: state.tenure,
             budgetMinutes: state.budget,
             cap: state.cap,
+            flatOnly: state.flatOnly,
           })
         : []
     ).filter((p) => passes(amenityData[dongKey(p.d)], state.amenities, amenityTh));
     map.setDongs(buildDongGeoJSON(dongPicks, state.tenure));
     dongMinutes = new Map(dongPicks.map((p) => [dongKey(p.d), Math.round(p.minutes)]));
+    renderCompare();
     renderRank(dongPicks);
     if (openDong) showDetail(openDong);
 

@@ -35,7 +35,8 @@ object DongGeo {
         val mapper = ObjectMapper().registerKotlinModule()
         require(inFile.exists()) { "동 집계가 없다: ${inFile.absolutePath}" }
 
-        val dongs = mapper.readTree(inFile)["dongs"]
+        val inRoot = mapper.readTree(inFile)
+        val dongs = inRoot["dongs"]
         val names = sggName("", mapper, sggNameFile)
 
         val cache: MutableMap<String, Map<String, Any?>> =
@@ -89,6 +90,7 @@ object DongGeo {
                     "jeonse" to v["jeonse"]?.takeIf { !it.isNull }?.asInt(),
                     "deposit" to v["wolseDeposit"]?.takeIf { !it.isNull }?.asInt(),
                     "monthly" to v["wolseMonthly"]?.takeIf { !it.isNull }?.asInt(),
+                    "trend" to v["trend"]?.map { t -> t?.takeIf { !it.isNull }?.asInt() },
                 )
             }
             out += mapOf(
@@ -100,7 +102,7 @@ object DongGeo {
             )
         }
         outFile.parentFile?.mkdirs()
-        mapper.writeValue(outFile, mapOf("dongs" to out))
+        mapper.writeValue(outFile, mapOf("months" to inRoot["months"], "dongs" to out))
         println("      좌표 붙은 동 ${out.size}개 -> ${outFile.absolutePath} (${outFile.length() / 1024}KB)")
     }
 

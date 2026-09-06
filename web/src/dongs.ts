@@ -11,6 +11,13 @@ export interface RoomStat {
   jeonse: number | null;
   deposit: number | null;
   monthly: number | null;
+  /**
+   * 월별 월세(보증금 1,000만원 기준). `months` 와 같은 순서, 거래 없는 달은 null.
+   *
+   * "지금 얼마"만으로는 오르는 중인지 내리는 중인지 모른다. 계약을 앞둔 사람에게
+   * 그 방향은 금액만큼 중요하다.
+   */
+  trend?: Array<number | null>;
 }
 
 export interface Dong {
@@ -20,6 +27,20 @@ export interface Dong {
   lat: number;
   deals: number;
   rooms: Partial<Record<RoomType, RoomStat>>;
+  /** 해발(m). SRTM 3×3 최솟값으로 지면을 추정한 값. */
+  elev?: number;
+  /**
+   * 가장 가까운 역과의 고도차(m). 양수면 역에서 집이 오르막이다.
+   *
+   * 자취에서 언덕은 월세 몇 만원보다 크게 체감된다. 짐 들고, 장 보고, 매일 걸어
+   * 올라가는 사람에게 "역에서 +40m"는 집을 고르는 기준이 되는데 지도만 봐서는
+   * 절대 알 수 없다 — 평면에는 높이가 없다.
+   */
+  climb?: number;
+  /** 그 역 이름. */
+  station?: string;
+  /** 그 역까지 직선거리(m). */
+  stationM?: number;
 }
 
 export const ROOM_LABEL: Record<RoomType, string> = {
@@ -54,7 +75,12 @@ export interface DongFilter {
   budgetMinutes: number;
   /** 상한 (월세는 만원/월, 전세는 만원). 0 이면 제한 없음. */
   cap: number;
+  /** 켜면 오르막이 심한 동네를 뺀다. */
+  flatOnly?: boolean;
 }
+
+/** "평지"의 경계(m). 이 정도까지는 걸어서 부담이 아니다. */
+export const FLAT_CLIMB_M = 10;
 
 /**
  * 도달권 안에 있으면서 예산에 맞는 동을 고른다.
@@ -67,6 +93,9 @@ export function filterDongs(all: Dong[], field: Field, f: DongFilter): DongPick[
   for (const d of all) {
     const s = d.rooms[f.room];
     if (!s || s.n < MIN_SAMPLES) continue;
+    // 고도를 모르는 동네는 조건을 걸었을 때 통과시키지 않는다. 편의시설과 같은 이유로,
+    // 모르는 걸 맞다고 말하면 사용자가 헛걸음을 한다.
+    if (f.flatOnly && (d.climb === undefined || d.climb > FLAT_CLIMB_M)) continue;
 
     let deposit: number | null;
     let monthly: number;
@@ -149,13 +178,17 @@ export function dongKey(d: Dong): string {
   return d.gu + "|" + d.name;
 }
 
+/** 추이의 가로축. `202602` 같은 형식이고 오래된 것부터다. */
+export let TREND_MONTHS: string[] = [];
+
 export async function loadDongs(baseUrl: string): Promise<Dong[]> {
   try {
     const res = await fetch(baseUrl + "dongs.json", {
       headers: { "ngrok-skip-browser-warning": "1" },
     });
     if (!res.ok) return [];
-    const json = (await res.json()) as { dongs: Dong[] };
+    const json = (await res.json()) as { dongs: Dong[]; months?: string[] };
+    TREND_MONTHS = json.months ?? [];
     return json.dongs ?? [];
   } catch {
     // 시세가 없어도 도달권은 동작해야 한다. 부가 정보지 전제가 아니다.

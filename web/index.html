@@ -3,7 +3,39 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>출세권</title>
+<title>출세권 — 통근 시간으로 살 곳 찾기</title>
+
+<!--
+  공유 미리보기.
+
+  이 도구는 한 번 쓰고 끝나기 쉬워서(이사는 몇 년에 한 번) 남에게 보내는 것이
+  사실상 유일한 자연 유입 경로다. 조건을 URL 에 담아 두고도 미리보기가 없으면
+  카톡에서 맨 링크로 뜨고, 그러면 아무도 안 누른다.
+
+  ⚠️ 조건은 `#해시`에 담기는데 해시는 서버로 전송되지 않는다. 크롤러가 볼 수 없으니
+  조건별 미리보기는 정적 호스팅에서 원리적으로 불가능하다. 대신 한 장을 제대로 만든다 —
+  og.png 는 실제 계산 결과(강남 40분 이내 291개 역)로 그린 것이지 장식이 아니다.
+-->
+<meta name="description" content="직장 역을 고르면 통근 40분 안에 닿는 동네를 지도에 칠하고, 그 안에서 원룸·투룸 시세와 편의시설 조건에 맞는 동네를 추려줍니다. 수도권 전철 621역, 동네 시세 1,768곳, 전월세 실거래 33만 건." />
+<meta name="theme-color" content="#2b6cb0" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="출세권" />
+<meta property="og:locale" content="ko_KR" />
+<meta property="og:url" content="https://klaus9267.github.io/chulsegwon/" />
+<meta property="og:title" content="출세권 — 통근 시간으로 살 곳 찾기" />
+<meta property="og:description" content="직장 역을 고르면 통근 40분 안에 닿는 동네와 원룸·투룸 시세를 지도에 칠합니다. 수도권 621역 · 동네 1,768곳 · 실거래 33만 건." />
+<meta property="og:image" content="https://klaus9267.github.io/chulsegwon/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="강남역에서 통근 40분 안에 닿는 수도권 전철역 291개를 통근 시간별 색으로 칠한 지도" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="출세권 — 통근 시간으로 살 곳 찾기" />
+<meta name="twitter:description" content="직장 역을 고르면 통근 40분 안에 닿는 동네와 원룸·투룸 시세를 지도에 칠합니다." />
+<meta name="twitter:image" content="https://klaus9267.github.io/chulsegwon/og.png" />
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23c3e6f5'/%3E%3Ccircle cx='16' cy='16' r='10.5' fill='%236fbcdd'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%232079b6'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%230a3566'/%3E%3C/svg%3E" />
 <style>
   :root {
     --bg:#fff; --fg:#14171a; --muted:#6b7480; --faint:#9aa3af;
@@ -303,6 +335,56 @@
     cursor:pointer; padding:0 2px; line-height:1; }
   .detail .commute{ margin-top:9px; padding:8px 10px; border-radius:9px;
     background:var(--accent-soft); font-size:12.5px; font-weight:650; color:var(--accent-deep); }
+  /* 동네 비교 — 고르는 일의 마지막은 결국 몇 개를 나란히 놓고 보는 것이다 */
+  /* 화면이 아니라 **지도**의 가운데에 둔다. 왼쪽 패널(322px)만큼 오른쪽으로 민다. */
+  .compare{ position:absolute; z-index:4; left:calc(50% + 168px); transform:translateX(-50%);
+    bottom:18px; max-width:min(560px, calc(100vw - 400px));
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    backdrop-filter:blur(12px) saturate(1.4); box-shadow:var(--shadow);
+    padding:11px 14px 12px; animation:cardIn .24s cubic-bezier(.2,.8,.25,1) both; }
+  .compare[hidden]{ display:none; }
+  .compare .chead{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .compare .chead > span{ font-size:11.5px; font-weight:700; color:var(--muted); }
+  .compare .clear{ margin-left:auto; border:0; background:none; color:var(--accent);
+    font-size:10.5px; font-weight:650; cursor:pointer; }
+  .compare table{ width:100%; border-collapse:collapse; font-size:12px; }
+  .compare th, .compare td{ padding:5px 6px; text-align:right;
+    font-variant-numeric:tabular-nums; border-top:1px solid var(--line-soft); }
+  .compare thead th{ border-top:0; text-align:right; font-size:12.5px; font-weight:750;
+    color:var(--fg); padding-bottom:7px; }
+  .compare th:first-child, .compare td:first-child{ text-align:left; color:var(--muted);
+    font-weight:550; width:74px; }
+  .compare thead th:first-child{ color:var(--faint); font-size:10.5px; font-weight:600; }
+  /* 각 줄에서 가장 나은 값. 비교는 결국 "어느 쪽이 나은가"를 묻는 일이다 */
+  .compare td.best{ color:var(--accent-deep); font-weight:800; }
+  .compare .drop{ border:0; background:none; color:var(--faint); cursor:pointer;
+    font-size:10px; padding:0 0 0 4px; }
+  .compare .drop:hover{ color:var(--fg); }
+  @media (max-width:640px){
+    .compare{ left:12px; right:12px; transform:none; max-width:none;
+      bottom:calc(72px + env(safe-area-inset-bottom)); }
+  }
+
+  /* 월세 추이 스파크라인 — 점마다 숫자를 붙이면 선의 모양이 안 보인다 */
+  .detail .trend{ margin-top:11px; }
+  .detail .thead{ display:flex; justify-content:space-between; align-items:baseline;
+    font-size:10.5px; color:var(--faint); font-weight:600; }
+  .detail .thead b{ font-size:11.5px; font-variant-numeric:tabular-nums; color:var(--muted); }
+  .detail .thead b.up{ color:#a4561c; }
+  .detail .thead b.down{ color:#2b7a4b; }
+  .detail .trend svg{ display:block; margin-top:2px; overflow:visible; }
+  .detail .tfoot{ display:flex; justify-content:space-between; font-size:10px;
+    color:var(--faint); font-variant-numeric:tabular-nums; }
+
+  /* 역에서 집까지의 오르막. 자취에서 언덕은 월세만큼 체감된다 */
+  .detail .terrain{ margin-top:7px; padding:7px 10px; border-radius:9px;
+    background:var(--line-soft); font-size:12px; color:var(--muted); font-weight:600;
+    display:flex; align-items:baseline; gap:6px; }
+  .detail .terrain b{ color:var(--fg); font-variant-numeric:tabular-nums; }
+  .detail .terrain span{ margin-left:auto; font-size:10.5px; color:var(--faint); font-weight:500; }
+  .detail .terrain.up{ background:rgba(224,123,57,.11); color:#8a4a12; }
+  .detail .terrain.up b{ color:#a4561c; }
+
   .detail .unit{ margin-top:12px; font-size:10.5px; color:var(--faint); font-weight:600; }
   .detail table{ width:100%; margin-top:4px; border-collapse:collapse; font-size:12.5px; }
   .detail td{ padding:6px 0; border-bottom:1px solid var(--line-soft); }
@@ -311,7 +393,14 @@
   .detail td:nth-child(2){ font-weight:750; font-variant-numeric:tabular-nums; }
   .detail td:last-child{ text-align:right; color:var(--faint); font-size:10.5px; }
   .detail .none{ color:var(--faint); font-weight:400; }
-  .detail .go{ display:block; width:100%; margin-top:12px; padding:10px; text-align:center;
+  .detail .pin{ display:block; width:100%; margin-top:12px; padding:9px; text-align:center;
+    border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg);
+    font-size:12px; font-weight:650; cursor:pointer;
+    transition:border-color .16s, color .16s, transform .1s; }
+  .detail .pin:hover{ border-color:var(--accent); color:var(--accent); }
+  .detail .pin:active{ transform:translateY(1px); }
+
+  .detail .go{ display:block; width:100%; margin-top:8px; padding:10px; text-align:center;
     border-radius:10px; background:var(--accent); color:#fff; font-size:12.5px; font-weight:700;
     text-decoration:none; transition:filter .15s, transform .1s; }
   .detail .go:hover{ filter:brightness(1.08); }
@@ -346,6 +435,7 @@
   <div id="map"></div>
 
   <div id="probe" class="probe" hidden></div>
+  <div id="compare" class="compare" hidden></div>
 
   <div id="detail" class="detail" hidden></div>
 

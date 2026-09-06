@@ -48,6 +48,15 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "elevation") {
+        Elevation.run(
+            manifestFile = File(opts["--manifest"] ?: "web/public/data/manifest.json"),
+            dongFile = File(opts["--dongs"] ?: "web/public/data/dongs.json"),
+            cacheFile = File(opts["--cache"] ?: "data/raw/rent/elevation-cache.json"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "amenity") {
         val key = System.getenv("KAKAO_REST_KEY")
             ?: error("KAKAO_REST_KEY 가 없다. .env 를 읽고 실행할 것")

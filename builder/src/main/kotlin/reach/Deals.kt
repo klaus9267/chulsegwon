@@ -463,6 +463,9 @@ object Deals {
         fun median(v: List<Int>): Int? =
             v.filter { it > 0 }.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
 
+        // 실제로 데이터가 있는 달만, 오래된 것부터. 화면의 가로축이 된다.
+        val months = deals.map { it.yearMonth }.distinct().sorted()
+
         val rows = deals.groupBy { "${it.sggCd}|${it.umdNm}" }.map { (key, group) ->
             val rooms = LinkedHashMap<String, Map<String, Any?>>()
             for (rt in listOf("ONE", "TWO", "THREE")) {
@@ -482,6 +485,14 @@ object Deals {
                 // 같은 보증금으로 맞춰야 동네끼리 비교가 된다.
                 val conv = wolse.map { convertedRent(it) }.sorted()
                 val midConv = if (conv.isEmpty()) null else conv[conv.size / 2]
+
+                // 월별 추이. "지금 얼마"만으로는 오르는 중인지 내리는 중인지 모른다.
+                // 6개월치를 이미 받아 두었으니 집계만 더 하면 되고, 같은 기준
+                // (보증금 1,000만원 환산)이라 월끼리 바로 비교된다.
+                val trend = months.map { ym ->
+                    val m = wolseAtBase(wolse.filter { it.yearMonth == ym })
+                    m
+                }
                 rooms[rt] = mapOf(
                     "deals" to bucket.size,
                     "jeonse" to median(jeonse.map { it.amountManwon }),
@@ -492,6 +503,7 @@ object Deals {
                     },
                     "wolseConverted" to midConv?.let { Math.round(it).toInt() },
                     "wolseN" to wolse.size,
+                    "trend" to trend,
                 )
             }
             mapOf(
@@ -505,7 +517,8 @@ object Deals {
 
         val f = File(outDir, "dongs-raw.json")
         f.parentFile?.mkdirs()
-        ObjectMapper().registerKotlinModule().writeValue(f, mapOf("dongs" to rows))
+        ObjectMapper().registerKotlinModule()
+            .writeValue(f, mapOf("months" to months, "dongs" to rows))
         println("      동 ${rows.size}개 -> ${f.absolutePath} (${f.length() / 1024}KB)")
     }
 }
