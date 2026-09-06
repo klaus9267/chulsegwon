@@ -163,6 +163,18 @@ export class MapLibreAdapter implements MapAdapter {
     });
   }
 
+  onPointerMove(
+    handler: (at: LngLat | null, screen: { x: number; y: number }) => void,
+  ): void {
+    this.map.on("mousemove", (e) => {
+      handler(
+        { lon: e.lngLat.lng, lat: e.lngLat.lat },
+        { x: e.originalEvent.clientX, y: e.originalEvent.clientY },
+      );
+    });
+    this.map.on("mouseout", () => handler(null, { x: 0, y: 0 }));
+  }
+
   onZoom(handler: (level: number) => void): void {
     // 카카오 level 로 환산해 넘긴다. 바깥에서 지도 구현을 알 이유가 없다.
     this.map.on("zoomend", () => handler(Math.max(1, Math.round(21 - this.map.getZoom()))));

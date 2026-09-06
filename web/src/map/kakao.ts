@@ -23,7 +23,8 @@ interface KakaoNS {
     CustomOverlay: new (opts: Record<string, unknown>) => KakaoOverlay;
     ZoomControl: new () => object;
     event: {
-    addListener(target: unknown, type: string, handler: () => void): void;
+    // 이벤트마다 인자가 다르다. mousemove 는 latLng 을 주고 zoom_changed 는 아무것도 안 준다.
+    addListener(target: unknown, type: string, handler: (e: never) => void): void;
   };
   ControlPosition: { RIGHT: unknown };
   };
@@ -142,6 +143,9 @@ export class KakaoAdapter implements MapAdapter {
   private dongOverlays: KakaoOverlay[] = [];
   private dongClick?: (key: string) => void;
   private zoomHandler?: (level: number) => void;
+  private moveHandler?: (at: LngLat | null, screen: { x: number; y: number }) => void;
+  /** 커서의 화면 좌표. 카카오 mousemove 는 위경도만 줘서 DOM 쪽에서 따로 받는다. */
+  private lastScreen = { x: 0, y: 0 };
   private buildingFeatures: GeoJSON.Feature[] = [];
 
   private constructor(
@@ -195,6 +199,24 @@ export class KakaoAdapter implements MapAdapter {
     // 확대·축소는 취소 사유로 삼지 않는다. 아직 한 번도 맞춰지지 않은 지도를 확대하면
     // 엉뚱한 곳이 확대될 뿐이라, 그때는 맞추기가 남아 있는 편이 낫다.
     ns.maps.event.addListener(map, "dragstart", () => { adapter.pendingFit = null; });
+
+    // 카카오의 mousemove 는 위경도만 준다. 화면 좌표는 DOM 이벤트로 따로 받아
+    // 짝지어 쓴다 — 같은 움직임에서 연달아 발생하므로 어긋나지 않는다.
+    // capture 로 받아야 한다. 카카오는 안쪽 요소에 리스너를 걸어서, 버블링으로
+    // 받으면 카카오 핸들러가 먼저 돌고 화면 좌표가 한 박자 늦는다.
+    container.addEventListener(
+      "mousemove",
+      (e) => { adapter.lastScreen = { x: e.clientX, y: e.clientY }; },
+      true,
+    );
+    container.addEventListener("mouseleave", () => {
+      adapter.moveHandler?.(null, adapter.lastScreen);
+    });
+    ns.maps.event.addListener(map, "mousemove", (e: { latLng: KakaoLatLng }) => {
+      const ll = e?.latLng;
+      if (!ll) return;
+      adapter.moveHandler?.({ lon: ll.getLng(), lat: ll.getLat() }, adapter.lastScreen);
+    });
 
     ns.maps.event.addListener(map, "dragend", () => {
       adapter.renderDongs();
@@ -354,6 +376,12 @@ export class KakaoAdapter implements MapAdapter {
 
   onZoom(handler: (level: number) => void): void {
     this.zoomHandler = handler;
+  }
+
+  onPointerMove(
+    handler: (at: LngLat | null, screen: { x: number; y: number }) => void,
+  ): void {
+    this.moveHandler = handler;
   }
 
   setDongs(dongs: GeoJSON.FeatureCollection): void {

@@ -30,6 +30,42 @@ export function createCombobox(config: ComboConfig) {
   let activeIndex = -1;
   let open = false;
 
+  /**
+   * 목록을 패널 밖(body)으로 꺼내 띄운다.
+   *
+   * 원래는 입력창 옆에 `position:absolute` 로 두었는데 두 가지가 겹쳐 깨졌다.
+   * 하나는 조건 영역이 `overflow-y:auto` 라 목록이 스크롤 박스에 **잘린다**는 것,
+   * 다른 하나는 패널의 `backdrop-filter` 가 합성 레이어를 만들어 목록이 뒤 내용과
+   * 섞여 보인다는 것이다. 둘 다 조상 때문에 생기므로 조상에서 빼내는 게 답이다.
+   *
+   * 대신 위치를 직접 계산해야 한다. 화면 아래 공간이 모자라면 위로 뒤집는데,
+   * 모바일에서는 패널이 하단 시트라 이게 없으면 목록이 화면 밖으로 나간다.
+   */
+  function place() {
+    const r = input.getBoundingClientRect();
+    const GAP = 5;
+    const MAX = 236;
+    const below = window.innerHeight - r.bottom - GAP - 8;
+    const above = r.top - GAP - 8;
+    const flip = below < 140 && above > below;
+
+    list.style.position = "fixed";
+    list.style.left = r.left + "px";
+    list.style.width = r.width + "px";
+    list.style.maxHeight = Math.max(96, Math.min(MAX, flip ? above : below)) + "px";
+    if (flip) {
+      list.style.top = "";
+      list.style.bottom = window.innerHeight - r.top + GAP + "px";
+    } else {
+      list.style.bottom = "";
+      list.style.top = r.bottom + GAP + "px";
+    }
+  }
+
+  // 조건 패널을 스크롤하거나 창 크기가 바뀌면 입력창이 움직인다. 목록만 제자리에
+  // 남으면 엉뚱한 곳에 떠 있게 되므로 따라가게 한다.
+  const reposition = () => { if (open) place(); };
+
   function normalize(s: string) {
     return s.trim().toLowerCase();
   }
@@ -90,16 +126,23 @@ export function createCombobox(config: ComboConfig) {
     // 이미 고른 값이 있으면 그 항목에 커서를 둔다. 다시 열었을 때 어디였는지 보인다.
     activeIndex = filtered.findIndex((o) => o.value === input.value.trim());
     open = true;
+    if (list.parentElement !== document.body) document.body.appendChild(list);
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
     render();
+    place();
     scrollActiveIntoView();
+    // capture 로 받아야 조건 패널 안쪽 스크롤도 잡힌다. 스크롤은 버블링하지 않는다.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
   }
 
   function hide() {
     open = false;
     list.hidden = true;
     input.setAttribute("aria-expanded", "false");
+    window.removeEventListener("scroll", reposition, true);
+    window.removeEventListener("resize", reposition);
   }
 
   function scrollActiveIntoView() {

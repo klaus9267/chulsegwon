@@ -61,6 +61,14 @@ export interface MapAdapter {
    * 어떤 데이터는 확대해야 비로소 필요해진다. 그때 받으면 처음 화면이 가벼워진다.
    */
   onZoom(handler: (level: number) => void): void;
+  /**
+   * 지도 위에서 커서가 움직일 때. 좌표와 화면 위치를 함께 준다.
+   *
+   * 색만으로는 20분 구간인지 30분 구간인지 알 수 없다. 단일 색조로 낼 수 있는
+   * 단계 수에 한계가 있어서인데, 그 한계는 색을 바꿔서가 아니라 **숫자를 직접
+   * 읽혀서** 넘는다. 화면 위치까지 주는 건 커서 옆에 붙여 보여주기 위한 것이다.
+   */
+  onPointerMove(handler: (at: LngLat | null, screen: { x: number; y: number }) => void): void;
   /** 배경지도를 실제로 띄웠는지. 실패 시 사용자에게 알린다. */
   readonly basemapOk: boolean;
   /** 지도 종류 표시용. */

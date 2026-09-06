@@ -65,10 +65,27 @@ export function buildIsobandsGeoJSON(field: Field, breaks: number[]): GeoJSON.Fe
  * 예산이 25분인데 경계가 60분까지 있으면 대부분의 구간이 비어 색이 단조로워진다.
  * 예산을 균등 분할해야 어느 예산에서도 밴드가 고르게 나온다.
  */
-export function breaksFor(budgetMinutes: number, bandCount = 5): number[] {
-  const step = budgetMinutes / bandCount;
-  const out: number[] = [];
-  for (let i = 0; i <= bandCount; i++) out.push(Math.round(i * step * 10) / 10);
-  out[out.length - 1] = budgetMinutes;
+export function breaksFor(budgetMinutes: number, bandCount = 4): number[] {
+  // 예산을 그냥 균등 분할하면 40분에서 경계가 0·8·16·24·32 로 나온다. 지도에서
+  // "여기가 몇 분 구간이냐"를 읽어야 하는데 그런 숫자는 머리에 안 남는다.
+  // 5분 배수로 맞추면 0·10·20·30 이 되고, 그건 보자마자 읽힌다.
+  //
+  // 칸 수를 정확히 맞추는 것보다 **경계가 읽히는 것**이 중요해서, 후보 간격 중
+  // 밴드 수가 목표에 가장 가까운 것을 고르되 같으면 넓은 쪽을 택한다.
+  // 넓은 쪽이 밴드 수가 적고, 밴드는 적을수록 서로 구분된다.
+  const CANDIDATES = [5, 10, 15, 20, 30, 60];
+  let best = CANDIDATES[0];
+  let bestScore = Infinity;
+  for (const step of CANDIDATES) {
+    const count = Math.ceil(budgetMinutes / step);
+    const score = Math.abs(count - bandCount);
+    if (score <= bestScore) {
+      bestScore = score;
+      best = step; // 동점이면 뒤쪽(넓은 간격)이 이긴다
+    }
+  }
+  const out = [0];
+  for (let v = best; v < budgetMinutes; v += best) out.push(v);
+  out.push(budgetMinutes);
   return out;
 }

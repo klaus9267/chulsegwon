@@ -1,5 +1,6 @@
 import { StationMatrixProvider } from "./provider";
 import { buildField, buildStationGeoJSON } from "./grid";
+import type { Field } from "./grid";
 import { buildIsobandsGeoJSON, breaksFor } from "./contour";
 import { createCombobox } from "./combobox";
 import { formatManwon } from "./complexes";
@@ -11,6 +12,7 @@ import { copyText, decodeState, encodeState } from "./share";
 import { ROOM_LABEL, buildDongGeoJSON, dongKey, filterDongs, loadDongs } from "./dongs";
 import { priceLabel } from "./dongs";
 import type { Dong, DongPick, RoomStat, RoomType, Tenure } from "./dongs";
+import { colorFor } from "./map/adapter";
 import type { Bounds, MapAdapter, Ramp } from "./map/adapter";
 import { MapLibreAdapter } from "./map/maplibre";
 import { KakaoAdapter } from "./map/kakao";
@@ -39,14 +41,27 @@ const BUILDING_PREFETCH_LEVEL = BUILDING_LEVEL + 2;
 
 const SEOUL_BOUNDS: Bounds = { west: 126.76, south: 37.42, east: 127.19, north: 37.7 };
 
-/** 짧을수록 진하게. */
+/**
+ * 짧을수록 진하게. 단일 색조 4단계.
+ *
+ * 원래 6단계였는데 인접 구간이 구분되지 않았다. 팔레트 검증기로 재보니
+ * 가장 옅은 두 구간의 색 거리가 **ΔE 8.2** 로, 기준(15)의 절반이었다.
+ * "완전한 색각으로도 구분이 어렵다"는 판정이고 실제로 그렇게 보였다 —
+ * 지도에서 45분 구간과 60분 구간이 같은 색으로 읽혔다.
+ *
+ * 단일 색조로는 5~6단계를 그 간격으로 못 벌린다(5단계에서도 10.4~12.0).
+ * 무지개로 바꾸면 벌어지지만, 크기를 나타내는 색은 한 색조여야 한다 —
+ * 색상이 바뀌면 "많다/적다"가 아니라 "다른 종류"로 읽힌다.
+ *
+ * 그래서 단계를 줄였다. 4단계에서 ΔE 15.4 로 통과한다.
+ * 옅은 두 단계는 배경 대비가 3:1 미만이라 **글자로 보정해야 한다**는 조건이
+ * 붙는데, 그게 커서 위치 도달시간 표시와 구간 경계 라벨이다.
+ */
 const RAMP: Ramp = [
-  [0, "#12467f"],
-  [10, "#2b6cb0"],
-  [20, "#4a90c4"],
-  [30, "#7fb3d5"],
-  [45, "#aecfe4"],
-  [60, "#d6e6f2"],
+  [0, "#0a3566"],
+  [10, "#2079b6"],
+  [20, "#6fbcdd"],
+  [30, "#c3e6f5"],
 ];
 
 /**
@@ -205,6 +220,8 @@ async function main() {
   // 동네 시세. 이쪽이 자취 타겟의 주 데이터다.
   /** 열려 있는 동네 상세. 조건을 바꿔도 같은 동네를 계속 보고 있게 한다. */
   let openDong: string | null = null;
+  /** 마지막으로 계산한 도달시간 격자. 커서 위치를 읽는 데 쓴다. */
+  let lastField: Field | null = null;
   let dongs: Dong[] = [];
   const dongByKey = new Map<string, Dong>();
   /** 마지막 계산에서 각 동까지 걸린 시간. 상세 카드가 다시 계산할 이유가 없다. */
@@ -384,6 +401,46 @@ async function main() {
   // 확대하면 개별 건물이 필요해진다. 그 시점에 받는다.
   map.onZoom((level) => ensureRentals(level));
 
+  /**
+   * 커서가 가리키는 곳의 통근 시간을 그대로 읽어준다.
+   *
+   * 색 단계는 네 개뿐이다. 더 늘리면 인접 구간이 구분되지 않아서(팔레트 검증 결과
+   * 6단계에서 ΔE 8.2, 기준의 절반) 오히려 못 읽게 된다. 그래서 해상도는 색이 아니라
+   * 숫자로 준다 — 어디에 올려도 1분 단위로 나온다.
+   *
+   * 격자를 이미 갖고 있어서 조회가 산술 두 번이다. 마우스를 움직이는 동안 계속
+   * 불려도 부담이 없다.
+   */
+  const probe = $("probe");
+  map.onPointerMove((at, screen) => {
+    if (!at || !lastField) {
+      probe.hidden = true;
+      return;
+    }
+    const f = lastField;
+    const col = Math.round((at.lon - f.minLon) / f.dLon);
+    const row = Math.round((at.lat - f.minLat) / f.dLat);
+    const inside = col >= 0 && col < f.cols && row >= 0 && row < f.rows;
+    const minutes = inside ? f.values[row * f.cols + col] : Number.POSITIVE_INFINITY;
+
+    const who = meta.stations[state.origin].name;
+    if (minutes > state.budget) {
+      probe.className = "probe out";
+      probe.textContent = state.budget + "분 밖";
+    } else {
+      probe.className = "probe";
+      probe.innerHTML = "<em>" + who + "</em>" + Math.round(minutes) + "분";
+    }
+    probe.hidden = false;
+    // 커서 오른쪽 아래에 붙이되 화면 밖으로 나가면 반대편으로 넘긴다.
+    const w = probe.offsetWidth || 90;
+    const h = probe.offsetHeight || 26;
+    const x = screen.x + 14 + w > window.innerWidth ? screen.x - 14 - w : screen.x + 14;
+    const y = screen.y + 16 + h > window.innerHeight ? screen.y - 16 - h : screen.y + 16;
+    probe.style.left = x + "px";
+    probe.style.top = y + "px";
+  });
+
   map.onDongClick((key) => {
     openDong = key;
     showDetail(key);
@@ -460,13 +517,22 @@ async function main() {
     // 색이 무슨 뜻인지 숫자로 보여준다. "가까움 / 40분" 만으로는 각 색이 몇 분인지 알 수 없다.
     // 구간 경계는 예산에 비례하므로 예산이 바뀌면 라벨도 같이 바뀌어야 한다.
     const step = state.budget / RAMP.length;
-    $("legend").innerHTML = RAMP.map(
-      ([, color], i) =>
-        '<span class="band"><i style="background:' + color + '"></i><b>' +
-        Math.round(i * step) + "</b></span>",
-    ).join("");
+    // 범례는 램프가 아니라 **실제 그려진 구간**을 보여준다. 색 칸 수와 지도 위
+    // 띠 수가 다르면 범례가 지도를 설명하지 못한다.
+    const breaks = breaksFor(state.budget, RAMP.length);
+    $("legend").innerHTML = breaks
+      .slice(0, -1)
+      .map((from, i) => {
+        const to = breaks[i + 1];
+        const color = colorFor((from + to) / 2, RAMP, state.budget);
+        return (
+          '<span class="band"><i style="background:' + color + '"></i><b>' +
+          from + "–" + to + "</b></span>"
+        );
+      })
+      .join("");
     $("legendLabels").textContent =
-      "색 = 통근 시간(분) · 최대 " + state.budget + "분" +
+      "색 = 통근 시간(분)" +
       (state.tenure === "WOLSE" ? " · 월세는 보증금 1,000만원 기준" : "");
   }
 
@@ -749,6 +815,7 @@ async function main() {
       walkCapMinutes: state.walkCap,
       cellMeters: CELL_METERS,
     });
+    lastField = field;
     const bands = field
       ? buildIsobandsGeoJSON(field, breaksFor(state.budget, RAMP.length))
       : ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection);
