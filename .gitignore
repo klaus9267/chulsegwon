@@ -32,3 +32,4 @@ data/raw/seoul-bus/
 data/raw/seoul/
 data/raw/bus-collect.log
 data/logs/
+data/out/verify/
