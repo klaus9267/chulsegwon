@@ -1,12 +1,14 @@
 {
- "dwellSec": 56,
+ "dwellSec": 61,
  "detour": 1.066,
- "note": "카카오 구간 830개 · 2026-09-07 23:27 · 평가셋 편향 -23초 · MAE 142초 · ±3분 77%",
- "fittedAt": "2026-09-07 23:27",
- "sample": 830,
+ "longSegmentMeters": 1500.0,
+ "longSegmentSpeedFactor": 1.8,
+ "note": "카카오 구간 984개 · 2026-09-07 23:34 · 평가셋 편향 -20초 · MAE 147초 · ±3분 73%",
+ "fittedAt": "2026-09-07 23:34",
+ "sample": 984,
  "holdout": {
-  "bias": -23,
-  "mae": 142,
-  "within3min": 76.5
+  "bias": -20,
+  "mae": 147,
+  "within3min": 72.8
  }
 }

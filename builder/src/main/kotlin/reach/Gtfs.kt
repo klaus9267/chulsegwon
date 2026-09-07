@@ -61,6 +61,10 @@ object Gtfs {
      */
     private const val DETOUR_DEFAULT = 1.07
 
+    /** 이 길이를 넘는 구간은 고속 구간으로 보고 속도를 올린다. */
+    private const val LONG_SEG_M_DEFAULT = 1500.0
+    private const val LONG_SEG_FACTOR_DEFAULT = 1.25
+
     /**
      * 노선 유형별 표정속도(km/h). **맨 마지막 수단**이다.
      *
@@ -87,28 +91,62 @@ object Gtfs {
      * `tools/gtfs_match.py --fit` 이 카카오 기준값(구간 800여 개)에 맞춰 계산해
      * 여기 쓰고, 다음 생성이 집어 든다. 값의 움직임은 `progress.csv` 에 남는다.
      */
-    private class Calibration(val dwellSec: Int, val detour: Double, val note: String)
+    private class Calibration(
+        val dwellSec: Int,
+        val detour: Double,
+        /**
+         * 긴 구간에서 속도를 올리는 배율과 그 경계(m).
+         *
+         * **왜 긴 구간만 따로 두나.** 속도 곡선은 서울 시내버스 `sectSpd` 로 배웠는데,
+         * 정류장 간격이 1.5km 넘는 고속 구간은 그 표본에 거의 없다(6~10km 칸이 30개뿐).
+         * 그래서 광역급행(M버스)·직행좌석이 실제보다 느리게 나왔다 — 카카오 대조에서
+         * 광역급행 편향 +660초였다.
+         *
+         * **그리고 이 칸에서만 속도를 따로 잴 수 있다.** 짧은 구간에서는 거리와
+         * 정류장 수가 거의 비례해서 "속도"와 "정류장당 시간"이 구분되지 않는다.
+         * 긴 구간은 정류장이 몇 개 없어 거리 항이 지배하므로 속도가 식별된다.
+         * 그래서 짧은 쪽은 정류장 비용으로, 긴 쪽은 속도 배율로 맞춘다.
+         */
+        val longSegmentMeters: Double,
+        val longSegmentSpeedFactor: Double,
+        val note: String,
+    )
 
     private fun loadCalibration(f: File): Calibration {
-        if (!f.exists()) return Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, "기본값 (보정 파일 없음)")
+        if (!f.exists()) return Calibration(
+            DWELL_SEC_DEFAULT, DETOUR_DEFAULT, LONG_SEG_M_DEFAULT, LONG_SEG_FACTOR_DEFAULT,
+            "기본값 (보정 파일 없음)")
         return try {
             @Suppress("UNCHECKED_CAST")
             val m = ObjectMapper().readValue(f, Map::class.java) as Map<String, Any?>
             Calibration(
                 (m["dwellSec"] as? Number)?.toInt() ?: DWELL_SEC_DEFAULT,
                 (m["detour"] as? Number)?.toDouble() ?: DETOUR_DEFAULT,
+                (m["longSegmentMeters"] as? Number)?.toDouble() ?: LONG_SEG_M_DEFAULT,
+                (m["longSegmentSpeedFactor"] as? Number)?.toDouble() ?: LONG_SEG_FACTOR_DEFAULT,
                 m["note"] as? String ?: f.name,
             )
         } catch (e: Exception) {
             // 보정 파일이 깨졌다고 생성이 멈추면 안 된다. 기본값으로 계속 간다.
             System.err.println("      ! 보정 파일을 못 읽었다 (${e.message}) — 기본값을 쓴다")
-            Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, "기본값 (보정 파일 손상)")
+            Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, LONG_SEG_M_DEFAULT,
+                LONG_SEG_FACTOR_DEFAULT, "기본값 (보정 파일 손상)")
         }
     }
 
     /** GPS 잡음을 자른다. 실제로 200km/h 짜리 구간이 찍힌다. */
     private const val MIN_KMH = 5.0
     private const val MAX_KMH = 80.0
+
+    /**
+     * 어떤 보정을 거쳐도 버스가 이보다 빠를 수는 없다(km/h).
+     *
+     * 고속도로 버스 제한속도가 100km/h 이고, 진출입 램프까지 포함한 구간 평균은
+     * 그보다 낮다. 이 뚜껑이 없을 때 5km 넘는 구간이 중앙 103km/h 로 나왔다 —
+     * 보정계수가 "이 구간에서 우리 속도 곡선이 얼마나 낮았나"를 흡수하다가
+     * 물리적으로 불가능한 값까지 밀어버린 것이다. 맞추기(fit)는 그런 걸 안 막는다.
+     */
+    private const val CEILING_KMH = 95.0
 
     private class Stop(val id: String, val name: String, val lat: Double, val lon: Double)
 
@@ -298,7 +336,9 @@ object Gtfs {
 
     fun export(gyeonggiDir: File, seoulDir: File, outFile: File, calibrationFile: File) {
         val cal = loadCalibration(calibrationFile)
-        println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 ×${"%.3f".format(cal.detour)} — ${cal.note}")
+        println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 ×${"%.3f".format(cal.detour)}" +
+            " · ${cal.longSegmentMeters.toInt()}m↑ 속도 ×${"%.2f".format(cal.longSegmentSpeedFactor)}" +
+            " — ${cal.note}")
         val mapper = ObjectMapper().registerKotlinModule()
         val stops = LinkedHashMap<String, Stop>()
         val routes = LinkedHashMap<String, Route>()
@@ -605,9 +645,13 @@ object Gtfs {
                         val meters = segmentMeters(t, k, stops, cal.detour)
                         // 이 구간을 실제로 재본 적이 있으면 그걸 쓰고, 없으면 같은
                         // 간격의 구간들이 보통 얼마나 빠른지로 채운다.
-                        val kmh = speed.kmh(t.srcRouteId, t.ords[k])?.also { measured++ }
+                        var kmh = speed.kmh(t.srcRouteId, t.ords[k])?.also { measured++ }
                             ?: model.kmh(t.routeType, meters)?.also { modelled++ }
                             ?: (FALLBACK_KMH[t.routeType] ?: DEFAULT_KMH).also { estimated++ }
+                        // 고속 구간은 우리 표본이 거의 없어 곡선이 낮게 나온다. 카카오
+                        // 대조로 잰 배율로 올린다 (자세한 이유는 Calibration 을 볼 것).
+                        if (meters >= cal.longSegmentMeters) kmh *= cal.longSegmentSpeedFactor
+                        kmh = kmh.coerceAtMost(CEILING_KMH)
                         sec += (meters / (kmh * 1000.0 / 3600.0)).toInt() + cal.dwellSec
                     }
                     times += sec

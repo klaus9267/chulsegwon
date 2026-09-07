@@ -120,22 +120,26 @@ def find(by_no, stops, coord, no, frm, to, nstops=None):
     cands = []
     for t, sq, typ, rid in by_no.get(no, []):
         names = [norm(stops.get(sid, '')) for sid, _ in sq]
-        i = next((k for k, v in enumerate(names) if v in fs), None)
-        if i is None:
-            continue
-        for j in range(i + 1, len(names)):
-            if names[j] in ts:
-                gm = sum(haversine(coord[sq[k][0]], coord[sq[k + 1][0]]) for k in range(i, j))
-                cands.append((j - i + 1, sq[j][1] - sq[i][1], typ, gm))
-                break
+        # ⚠️ 승차 정류장이 한 운행에 여러 번 나올 수 있다 — 순환·왕복 노선이 그렇다.
+        # 첫 번째만 보면 "한 바퀴 돌아서 가는" 조합을 골라 소요시간이 몇 배로 부푼다.
+        # 실제로 그것 때문에 17번이 카카오 400초 vs 우리 4110초 로 나왔었다.
+        # 데이터가 아니라 대조기가 틀린 것이었다. 모든 짝을 만들고 아래에서 고른다.
+        for i, v in enumerate(names):
+            if v not in fs:
+                continue
+            for j in range(i + 1, len(names)):
+                if names[j] in ts:
+                    gm = sum(haversine(coord[sq[k][0]], coord[sq[k + 1][0]]) for k in range(i, j))
+                    cands.append((j - i + 1, sq[j][1] - sq[i][1], typ, gm))
+                    break
     if not cands:
         return None, ('노선없음' if no not in by_no else '구간없음')
     if nstops:
-        # 정류장 수가 같은 후보를 고른다. 카카오와 우리가 세는 방식이 1 차이날 수
-        # 있어서 ±1 까지 같은 급으로 본다.
-        best = min(cands, key=lambda c: (abs(c[0] - nstops) > 1, abs(c[0] - nstops)))
+        # 정류장 수가 카카오와 같은 후보를 고른다. 세는 방식이 1 차이날 수 있어
+        # ±1 까지 같은 급으로 보고, 그 안에서는 가장 짧은 것을 고른다.
+        best = min(cands, key=lambda c: (abs(c[0] - nstops) > 1, abs(c[0] - nstops), c[1]))
         return best, None
-    return cands[0], None
+    return min(cands, key=lambda c: c[0]), None
 
 
 def fit(legs):
@@ -296,7 +300,10 @@ CALIB = 'data/calibration.json'
 # 흔들림을 무시하는 폭. 이보다 작게 움직이면 값을 바꾸지 않는다.
 DEADBAND_SEC = 4
 DEADBAND_DETOUR = 0.01
+DEADBAND_FACTOR = 0.05
 DETOUR_DEFAULT = 1.07
+LONG_SEG_M = 1500.0
+LONG_FACTOR_DEFAULT = 1.25
 
 
 def current_calibration():
@@ -336,16 +343,38 @@ def refit(ok, stamp):
         print('  표본이 얇아 보정을 다시 맞추지 않는다 (학습 %d · 평가 %d)' % (len(tr), len(te)))
         return None
 
-    def ride(r):
-        return max(1.0, r['ours_sec'] - (r['ours_n'] - 1) * dw)
+    fac = float(cur.get('longSegmentSpeedFactor', LONG_FACTOR_DEFAULT))
 
-    def stats(data, b):
-        d = [ride(r) + b * (r['ours_n'] - 1) - r['kakao_sec'] for r in data]
+    def spacing(r):
+        return r['kakao_m'] / max(1, r['ours_n'] - 1)
+
+    def ride(r):
+        """지금 모델의 순수 주행 시간. 긴 구간 배율은 이미 들어가 있으므로 되돌린다."""
+        v = max(1.0, r['ours_sec'] - (r['ours_n'] - 1) * dw)
+        return v * fac if spacing(r) >= LONG_SEG_M else v
+
+    def stats(data, b, f):
+        d = []
+        for r in data:
+            v = ride(r)
+            if spacing(r) >= LONG_SEG_M:
+                v /= f
+            d.append(v + b * (r['ours_n'] - 1) - r['kakao_sec'])
         n = len(d)
         return (sum(d) / n, sum(abs(x) for x in d) / n,
-                100.0 * sum(1 for x in d if abs(x) <= 180) / n)
+                100.0 * sum(1 for x in d if abs(x)<= 180) / n)
 
-    best = min(range(0, 181), key=lambda b: stats(tr, b)[1])
+    # 긴 구간 속도 배율. **이 칸에서만 속도가 식별된다** — 정류장이 몇 개 없어
+    # 거리 항이 지배하기 때문이다. 짧은 구간에서는 거리와 정류장 수가 거의 비례해서
+    # "속도"와 "정류장당 시간"이 서로를 흉내낼 수 있고, 그래서 하나만 맞춘다.
+    longs = [r for r in tr if spacing(r) >= LONG_SEG_M]
+    if len(longs) >= 20:
+        newfac = min([round(1.0 + 0.05 * i, 2) for i in range(0, 41)],
+                     key=lambda f: stats(longs, dw, f)[1])
+    else:
+        newfac = fac
+
+    best = min(range(0, 181), key=lambda b: stats(tr, b, newfac)[1])
 
     # 불감대. 값을 뽑을 때마다 1~2초씩 흔들리는데(반올림 때문이다) 그때마다
     # GTFS 를 다시 만들면 스케줄이 헛돈다. 의미 있게 움직였을 때만 바꾼다.
@@ -353,20 +382,24 @@ def refit(ok, stamp):
         best = dw
     if abs(detour - cur.get('detour', DETOUR_DEFAULT)) < DEADBAND_DETOUR:
         detour = cur.get('detour', DETOUR_DEFAULT)
+    if abs(newfac - fac) < DEADBAND_FACTOR:
+        newfac = fac
 
-    bias, mae, within = stats(te, best)
+    bias, mae, within = stats(te, best, newfac)
     note = ('카카오 구간 %d개 · %s · 평가셋 편향 %+.0f초 · MAE %.0f초 · ±3분 %.0f%%'
             % (len(ok), stamp, bias, mae, within))
-    out = {'dwellSec': best, 'detour': detour, 'note': note, 'fittedAt': stamp,
-           'sample': len(ok), 'holdout': {'bias': round(bias), 'mae': round(mae),
-                                          'within3min': round(within, 1)}}
+    out = {'dwellSec': best, 'detour': detour,
+           'longSegmentMeters': LONG_SEG_M, 'longSegmentSpeedFactor': newfac,
+           'note': note, 'fittedAt': stamp, 'sample': len(ok),
+           'holdout': {'bias': round(bias), 'mae': round(mae), 'within3min': round(within, 1)}}
     json.dump(out, io.open(CALIB, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     print()
     print('보정 갱신 → %s' % CALIB)
-    print('  정류장 통과 %d초 (이전 %d초) · 구간거리 ×%.3f' % (best, dw, detour))
+    print('  정류장 통과 %d초 (이전 %d초) · 구간거리 ×%.3f · %dm↑ 속도 ×%.2f (이전 ×%.2f)'
+          % (best, dw, detour, LONG_SEG_M, newfac, fac))
     print('  평가셋(맞추는 데 안 쓴 OD 절반): 편향 %+.0f초 · MAE %.0f초 · ±3분 이내 %.0f%%'
           % (bias, mae, within))
-    print('CALIBRATION %d %.3f %+0.f %.0f %.1f' % (best, detour, bias, mae, within))
+    print('CALIBRATION %d %.3f %+0.f %.0f %.1f %.2f' % (best, detour, bias, mae, within, newfac))
     return out
 
 
