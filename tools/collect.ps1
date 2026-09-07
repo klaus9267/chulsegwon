@@ -88,6 +88,29 @@ Step '서울 버스'  @('--mode','seoulbus')
 Step 'GTFS 생성'  @('--mode','gtfs')
 Step 'GTFS 검사'  @('--mode','gtfscheck')
 
+# 5) 바깥 기준값과 대조하고 보정을 다시 맞춘다.
+#
+#    이게 이 스크립트에서 제일 중요한 단계다. gtfscheck 는 "규격에 맞나"까지만 보고
+#    **전체가 일정하게 빠른 것**은 못 잡는다. 실제로 처음 만든 GTFS 는 카카오맵 대비
+#    30% 빨랐고, 그건 규격 검사를 멀쩡히 통과했다.
+#
+#    tools/reference-bus.json 은 카카오맵에서 받아 고정해둔 구간이다. 속도 표본이
+#    바뀌면 대조 오차도 바뀌고, --fit 이 정류장 통과 비용을 다시 계산해
+#    data/calibration.json 에 쓴다. 값이 바뀌었으면 그걸로 한 번 더 만든다.
+New-Item -ItemType Directory -Force -Path 'data/out/verify' | Out-Null
+$before = if (Test-Path 'data/calibration.json') { Get-Content 'data/calibration.json' -Raw } else { '' }
+Say '▶ 카카오 대조 · 보정'
+$fit = & python tools/gtfs_match.py tools/reference-bus.json data/out/verify/matched.json --fit 2>&1 | Out-String
+$fit -split "`n" | Where-Object { $_ -match '구간 \d+개|편향|보정 갱신|정류장 통과' } |
+    ForEach-Object { Say ('   ' + $_.Trim()) }
+$calLine = [regex]::Match($fit, 'CALIBRATION (\d+) ([\d.]+) ([-+]?\d+) (\d+) ([\d.]+)')
+$after = if (Test-Path 'data/calibration.json') { Get-Content 'data/calibration.json' -Raw } else { '' }
+if ($after -and $after -ne $before) {
+    Say '   보정이 바뀌었다 — 그 값으로 다시 만든다'
+    Step 'GTFS 재생성' @('--mode','gtfs')
+}
+Say '◀ 카카오 대조 · 보정'
+
 Say "===== 수집 끝 ====="
 
 # ── 지표 한 줄 ───────────────────────────────────────────────
@@ -96,7 +119,7 @@ Say "===== 수집 끝 ====="
 $metrics = Join-Path $logDir 'progress.csv'
 if (-not (Test-Path $metrics)) {
     Set-Content -Path $metrics -Encoding UTF8 `
-        -Value 'time,snapshots,measured_segments,measured_pct,stops,routes,trips,zip_kb,speed_curve'
+        -Value 'time,snapshots,measured_segments,measured_pct,stops,routes,trips,zip_kb,dwell_sec,detour,kakao_bias_sec,kakao_mae_sec,kakao_within3min,speed_curve'
 }
 $snapCount = @(Get-ChildItem 'data/raw/seoul-bus/speed' -Filter '*.jsonl' -ErrorAction SilentlyContinue).Count
 $zip = Get-Item 'data/out/gtfs-seoul-gyeonggi.zip' -ErrorAction SilentlyContinue
@@ -107,7 +130,8 @@ $s2 = [regex]::Match($last, '정류장 ([\d,]+) · 노선 ([\d,]+) · 운행 ([\
 # 멈추지만, 스냅샷이 쌓이면서 실제로 좋아지는 건 이 곡선이다. 값이 흔들리다 멎으면
 # 표본이 충분해진 것이고, 그때가 수집을 줄여도 되는 시점이다.
 $cv = [regex]::Match($last, '속도 곡선\(구간길이:km/h\) (.+)')
-$row = '{0},{1},{2},{3},{4},{5},{6},{7},{8}' -f `
+$cg = { param($i) if ($calLine.Success) { $calLine.Groups[$i].Value } else { '' } }
+$row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}' -f `
     (Get-Date -Format 'yyyy-MM-dd HH:mm'), $snapCount,
     $(if ($m.Success) { $m.Groups[1].Value -replace ',','' } else { '' }),
     $(if ($m.Success) { $m.Groups[4].Value } else { '' }),
@@ -115,6 +139,7 @@ $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8}' -f `
     $(if ($s2.Success) { $s2.Groups[2].Value -replace ',','' } else { '' }),
     $(if ($s2.Success) { $s2.Groups[3].Value -replace ',','' } else { '' }),
     $(if ($zip) { [int]($zip.Length / 1KB) } else { '' }),
+    (& $cg 1), (& $cg 2), (& $cg 3), (& $cg 4), (& $cg 5),
     $(if ($cv.Success) { '"' + $cv.Groups[1].Value.Trim() + '"' } else { '' })
 Add-Content -Path $metrics -Value $row -Encoding UTF8
 Say "지표: $row"

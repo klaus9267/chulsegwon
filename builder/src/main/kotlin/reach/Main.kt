@@ -66,6 +66,7 @@ fun main(args: Array<String>) {
             gyeonggiDir = File(opts["--gyeonggi"] ?: "data/raw/bus"),
             seoulDir = File(opts["--seoul"] ?: "data/raw/seoul-bus"),
             outFile = File(opts["--out"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            calibrationFile = File(opts["--calibration"] ?: "data/calibration.json"),
         )
         return
     }

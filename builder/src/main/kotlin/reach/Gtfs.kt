@@ -42,9 +42,11 @@ object Gtfs {
      * 이 자료만으로는 둘이 구분되지 않는다(MAE 지형이 대각선 골짜기다).
      * 그래서 **잰 값은 건드리지 않고 재본 적 없는 쪽에 보정을 넣었다.**
      * 낮 시간대 `sectSpd` 가 쌓이면 순항 속도가 제 값을 찾고, 그때 이 값도
-     * 다시 맞춰야 한다. 그 재측정이 `tools/gtfs_match.py` 다.
+     * 다시 맞춰야 한다. **그래서 상수가 아니라 [loadCalibration] 이 읽는 값이다** —
+     * `tools/gtfs_match.py --fit` 이 카카오 기준값에 맞춰 다시 계산해 파일에 쓰고,
+     * 다음 실행이 그걸 집어 든다. 아래는 그 파일이 없을 때의 값이다.
      */
-    private const val DWELL_SEC = 58
+    private const val DWELL_SEC_DEFAULT = 58
 
     /**
      * 경기 구간 거리 보정.
@@ -55,9 +57,9 @@ object Gtfs {
      * 값이었는데, 그건 **구간 하나짜리 중앙값**이라 짧은 구간이 표를 지배했다.
      * 카카오가 주는 실제 도로거리와 **여러 구간을 이어 붙인 단위**로 대보니
      * 서울 1.07 · 경기 1.06 이다(구간 825개). 사람이 실제로 타는 단위가 후자라
-     * 그쪽을 쓴다.
+     * 그쪽을 쓴다. 이 값도 보정 파일이 덮어쓴다.
      */
-    private const val DETOUR = 1.07
+    private const val DETOUR_DEFAULT = 1.07
 
     /**
      * 노선 유형별 표정속도(km/h). **맨 마지막 수단**이다.
@@ -74,6 +76,35 @@ object Gtfs {
         "인천버스" to 22.0, "경기버스" to 22.0,
     )
     private const val DEFAULT_KMH = 19.0
+
+    /**
+     * 바깥 기준값에 맞춰 다시 계산되는 값들.
+     *
+     * **왜 파일로 빼나.** 이 파이프라인은 스스로 좋아지도록 만든 것이다. 수집이
+     * 하루 다섯 번 돌면서 속도 표본이 바뀌면 정류장 통과 비용도 따라 바뀌어야 하는데,
+     * 상수로 두면 사람이 코드를 고쳐야 한다. 그러면 안 고쳐진다.
+     *
+     * `tools/gtfs_match.py --fit` 이 카카오 기준값(구간 800여 개)에 맞춰 계산해
+     * 여기 쓰고, 다음 생성이 집어 든다. 값의 움직임은 `progress.csv` 에 남는다.
+     */
+    private class Calibration(val dwellSec: Int, val detour: Double, val note: String)
+
+    private fun loadCalibration(f: File): Calibration {
+        if (!f.exists()) return Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, "기본값 (보정 파일 없음)")
+        return try {
+            @Suppress("UNCHECKED_CAST")
+            val m = ObjectMapper().readValue(f, Map::class.java) as Map<String, Any?>
+            Calibration(
+                (m["dwellSec"] as? Number)?.toInt() ?: DWELL_SEC_DEFAULT,
+                (m["detour"] as? Number)?.toDouble() ?: DETOUR_DEFAULT,
+                m["note"] as? String ?: f.name,
+            )
+        } catch (e: Exception) {
+            // 보정 파일이 깨졌다고 생성이 멈추면 안 된다. 기본값으로 계속 간다.
+            System.err.println("      ! 보정 파일을 못 읽었다 (${e.message}) — 기본값을 쓴다")
+            Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, "기본값 (보정 파일 손상)")
+        }
+    }
 
     /** GPS 잡음을 자른다. 실제로 200km/h 짜리 구간이 찍힌다. */
     private const val MIN_KMH = 5.0
@@ -265,7 +296,9 @@ object Gtfs {
 
     // ── 진입점 ───────────────────────────────────────────────────
 
-    fun export(gyeonggiDir: File, seoulDir: File, outFile: File) {
+    fun export(gyeonggiDir: File, seoulDir: File, outFile: File, calibrationFile: File) {
+        val cal = loadCalibration(calibrationFile)
+        println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 ×${"%.3f".format(cal.detour)} — ${cal.note}")
         val mapper = ObjectMapper().registerKotlinModule()
         val stops = LinkedHashMap<String, Stop>()
         val routes = LinkedHashMap<String, Route>()
@@ -288,7 +321,7 @@ object Gtfs {
         // 노선을 다 읽은 뒤에 만든다.
         val model = SpeedModel(speed.observations { rid -> routes["S$rid"]?.type })
         println("      속도 곡선(구간길이:km/h) ${model.describe()}")
-        write(outFile, stops, routes, trips, speed, model)
+        write(outFile, stops, routes, trips, speed, model, cal)
     }
 
     // ── 서울 ────────────────────────────────────────────────────
@@ -492,7 +525,7 @@ object Gtfs {
 
     private fun write(
         outFile: File, stops: Map<String, Stop>, routes: Map<String, Route>,
-        trips: List<Trip>, speed: SpeedTable, model: SpeedModel,
+        trips: List<Trip>, speed: SpeedTable, model: SpeedModel, cal: Calibration,
     ) {
         outFile.parentFile?.mkdirs()
 
@@ -569,13 +602,13 @@ object Gtfs {
                 var sec = 0
                 for (k in t.stops.indices) {
                     if (k > 0) {
-                        val meters = segmentMeters(t, k, stops)
+                        val meters = segmentMeters(t, k, stops, cal.detour)
                         // 이 구간을 실제로 재본 적이 있으면 그걸 쓰고, 없으면 같은
                         // 간격의 구간들이 보통 얼마나 빠른지로 채운다.
                         val kmh = speed.kmh(t.srcRouteId, t.ords[k])?.also { measured++ }
                             ?: model.kmh(t.routeType, meters)?.also { modelled++ }
                             ?: (FALLBACK_KMH[t.routeType] ?: DEFAULT_KMH).also { estimated++ }
-                        sec += (meters / (kmh * 1000.0 / 3600.0)).toInt() + DWELL_SEC
+                        sec += (meters / (kmh * 1000.0 / 3600.0)).toInt() + cal.dwellSec
                     }
                     times += sec
                 }
@@ -664,7 +697,7 @@ object Gtfs {
      * 이 검사가 없을 때 799번의 한 구간이 직선 5.6km 를 26초에 가는 걸로 나왔다 —
      * 시속 777km. 값 하나가 틀린 건데 그게 검증기까지 살아남았다.
      */
-    private fun segmentMeters(t: Trip, k: Int, stops: Map<String, Stop>): Double {
+    private fun segmentMeters(t: Trip, k: Int, stops: Map<String, Stop>, detour: Double): Double {
         val a = stops[t.stops[k - 1]]
         val b = stops[t.stops[k]]
         val straight = if (a != null && b != null)
@@ -672,7 +705,7 @@ object Gtfs {
         val given = t.dists.getOrElse(k) { -1 }
         if (given > 0 && given >= straight) return given.toDouble()
         if (a == null || b == null) return 400.0
-        return (straight * DETOUR).coerceAtLeast(30.0)
+        return (straight * detour).coerceAtLeast(30.0)
     }
 
     private fun hms(sec: Int) = "%02d:%02d:%02d".format(sec / 3600, sec % 3600 / 60, sec % 60)

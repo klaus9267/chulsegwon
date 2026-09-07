@@ -276,6 +276,10 @@ def main():
         if len(v) >= 5:
             print('  %-12s n=%-4d 중앙 %.2f배' % (t, len(v), pct(v, 0.5)))
 
+    if '--fit' in sys.argv:
+        import datetime
+        refit(ok, datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
+
     print()
     print('가장 크게 어긋난 구간:')
     for r in sorted(ok, key=lambda r: -abs(r['ours_sec'] - r['kakao_sec']))[:12]:
@@ -283,6 +287,87 @@ def main():
         print('  %-8s %-6s %-16s→%-16s 카카오 %4d초 · 우리 %4d초 · %+5d초 (%+4.0f%%) %s'
               % (r['no'], r['src'], r['from'][:14], r['to'][:14],
                  r['kakao_sec'], r['ours_sec'], d, d * 100.0 / r['kakao_sec'], r['od']))
+
+
+# ── 보정 ────────────────────────────────────────────────────
+
+CALIB = 'data/calibration.json'
+
+# 흔들림을 무시하는 폭. 이보다 작게 움직이면 값을 바꾸지 않는다.
+DEADBAND_SEC = 4
+DEADBAND_DETOUR = 0.01
+DETOUR_DEFAULT = 1.07
+
+
+def current_calibration():
+    try:
+        return json.load(io.open(CALIB, encoding='utf-8'))
+    except Exception:
+        return {'dwellSec': 58, 'detour': 1.07}
+
+
+def refit(ok, stamp):
+    """카카오 기준값에 맞춰 보정값을 다시 계산하고 파일에 쓴다.
+
+    **왜 여기서 하나.** 이 파이프라인은 사람 없이 돈다. 수집 스케줄이 하루 다섯 번
+    속도 스냅샷을 찍는데, 표본이 바뀌면 정류장 통과 비용도 따라 바뀌어야 한다.
+    그걸 코드 상수로 두면 사람이 고쳐야 하고, 그러면 안 고쳐진다.
+
+    **맞추는 건 하나뿐이다.** 주행 배율과 정류장 비용은 이 자료로 구분되지 않는다
+    (MAE 지형이 대각선 골짜기다). 그래서 **잰 값인 순항 속도는 건드리지 않고**
+    재본 적 없는 정류장 통과 비용만 움직인다. 낮 스냅샷이 쌓여 순항 속도가 제 값을
+    찾으면 이 값은 저절로 내려가야 한다 — 안 내려가면 다른 데가 틀린 것이다.
+
+    **OD 를 반으로 갈라** 한쪽으로 맞추고 다른 쪽으로 평가한다. 같은 자료로 맞추고
+    같은 자료로 자랑하면 아무것도 검증한 게 아니다.
+    """
+    cur = current_calibration()
+    dw = int(cur.get('dwellSec', 58))
+
+    # 구간거리 보정: 카카오 도로거리 ÷ 우리 직선거리. 직접 재는 값이라 맞추지 않고 잰다.
+    ratios = [r['kakao_m'] / r['ours_m'] for r in ok if r['ours_m'] and r['ours_m'] > 300]
+    detour = round(pct(ratios, 0.5), 3) if len(ratios) >= 30 else cur.get('detour', 1.07)
+
+    ods = sorted({r['od'] for r in ok})
+    train = {o for i, o in enumerate(ods) if i % 2 == 0}
+    tr = [r for r in ok if r['od'] in train]
+    te = [r for r in ok if r['od'] not in train]
+    if len(tr) < 50 or len(te) < 50:
+        print('  표본이 얇아 보정을 다시 맞추지 않는다 (학습 %d · 평가 %d)' % (len(tr), len(te)))
+        return None
+
+    def ride(r):
+        return max(1.0, r['ours_sec'] - (r['ours_n'] - 1) * dw)
+
+    def stats(data, b):
+        d = [ride(r) + b * (r['ours_n'] - 1) - r['kakao_sec'] for r in data]
+        n = len(d)
+        return (sum(d) / n, sum(abs(x) for x in d) / n,
+                100.0 * sum(1 for x in d if abs(x) <= 180) / n)
+
+    best = min(range(0, 181), key=lambda b: stats(tr, b)[1])
+
+    # 불감대. 값을 뽑을 때마다 1~2초씩 흔들리는데(반올림 때문이다) 그때마다
+    # GTFS 를 다시 만들면 스케줄이 헛돈다. 의미 있게 움직였을 때만 바꾼다.
+    if abs(best - dw) < DEADBAND_SEC:
+        best = dw
+    if abs(detour - cur.get('detour', DETOUR_DEFAULT)) < DEADBAND_DETOUR:
+        detour = cur.get('detour', DETOUR_DEFAULT)
+
+    bias, mae, within = stats(te, best)
+    note = ('카카오 구간 %d개 · %s · 평가셋 편향 %+.0f초 · MAE %.0f초 · ±3분 %.0f%%'
+            % (len(ok), stamp, bias, mae, within))
+    out = {'dwellSec': best, 'detour': detour, 'note': note, 'fittedAt': stamp,
+           'sample': len(ok), 'holdout': {'bias': round(bias), 'mae': round(mae),
+                                          'within3min': round(within, 1)}}
+    json.dump(out, io.open(CALIB, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    print()
+    print('보정 갱신 → %s' % CALIB)
+    print('  정류장 통과 %d초 (이전 %d초) · 구간거리 ×%.3f' % (best, dw, detour))
+    print('  평가셋(맞추는 데 안 쓴 OD 절반): 편향 %+.0f초 · MAE %.0f초 · ±3분 이내 %.0f%%'
+          % (bias, mae, within))
+    print('CALIBRATION %d %.3f %+0.f %.0f %.1f' % (best, detour, bias, mae, within))
+    return out
 
 
 if __name__ == '__main__':
