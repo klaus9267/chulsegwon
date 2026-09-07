@@ -61,6 +61,23 @@ object Gtfs {
      */
     private const val DETOUR_DEFAULT = 1.07
 
+    /**
+     * 되짚음 판정: 뒷조각 정류장이 앞조각 정류장의 이 거리 안이면 "같은 길을 되짚었다".
+     *
+     * 처음 60m 로 뒀다가 진짜 왕복 노선이 순환으로 오판됐다. 복귀 경로는 **길 건너편**
+     * 이라 정류장이 60m 보다 멀다. 자르기 후보 1,823개에서 반경별 되짚음 비율을 재보니
+     * 150m 에서 두 무리가 갈린다:
+     *
+     * ```
+     * 진짜 왕복   123 0.51 · 810 0.76 · 114 0.86 · 땡큐32 0.87 · 67 0.94 · 168 0.94
+     * 편도 순환   60B 0.08 · 80A 0.25 · (안산 A/B 순환)
+     * ```
+     */
+    private const val RETRACE_M = 150.0
+
+    /** 뒷조각의 이만큼이 되짚어야 왕복으로 본다. 그 아래는 편도 순환으로 둔다. */
+    private const val RETRACE_MIN = 0.45
+
     /** 이 길이를 넘는 구간은 고속 구간으로 보고 속도를 올린다. */
     private const val LONG_SEG_M_DEFAULT = 1500.0
     private const val LONG_SEG_FACTOR_DEFAULT = 1.25
@@ -537,6 +554,7 @@ object Gtfs {
         trips: MutableList<Trip>, fromSeoul: Set<String>,
     ) {
         var split = 0
+        var loops = 0
         var handed = 0
         for (row in readAll(File(dir, "route-stops.jsonl"), mapper)) {
             val id = "G" + (row["id"] as? String ?: continue)
@@ -556,7 +574,7 @@ object Gtfs {
                 .sortedBy { (it["ord"] as? Number)?.toInt() ?: 0 }
             if (o.size < 2) continue
             val parts = splitAtTurnaround(o, stops)
-            if (parts.size > 1) split++
+            if (parts.size > 1) split++ else if (o.size >= 20) loops++
             for ((di, part) in parts.withIndex()) {
                 if (part.size < 2) continue
                 trips += Trip(
@@ -569,7 +587,8 @@ object Gtfs {
             }
         }
         println("      경기: 서울 기하를 쓴 노선 ${"%,d".format(handed)}개 · " +
-            "방향이 없어 반환점에서 자른 노선 ${"%,d".format(split)}개")
+            "왕복이라 자른 노선 ${"%,d".format(split)}개 · " +
+            "되짚지 않아 그대로 둔 순환 노선 ${"%,d".format(loops)}개")
     }
 
     /**
@@ -603,7 +622,31 @@ object Gtfs {
         if (Geo.haversineMeters(first.lat, first.lon, end.lat, end.lon) > farD * 0.35) {
             return listOf(ordered)
         }
-        return listOf(ordered.subList(0, far + 1), ordered.subList(far, ordered.size))
+
+        // ⚠️ 여기까지 통과해도 **편도 순환**일 수 있다. 순환도 종점이 기점으로
+        // 돌아오기 때문에 위 조건으로는 안 걸러진다. 그런 노선을 반으로 자르면
+        // 절단선을 가로지르는 승하차가 통째로 사라진다 — 그 노선으로는 못 가는
+        // 걸로 계산된다. 안산 80A·N80A·60B·N60B 가 실제로 그랬다.
+        //
+        // 왕복인지 순환인지는 **되짚는가**로 가른다. 이름으로 보면 안 된다 —
+        // 건너편 정류장은 이름이 다르다(`○○역` vs `○○역건너편`). 좌표로 본다.
+        val back = ordered.subList(far, ordered.size)
+        val forth = ordered.subList(0, far + 1).mapNotNull { r ->
+            stops["G" + (r["stop"] as? String ?: return@mapNotNull null)]
+        }
+        if (forth.isEmpty()) return listOf(ordered)
+        var retraced = 0
+        var counted = 0
+        for (r in back) {
+            val b = stops["G" + (r["stop"] as? String ?: continue)] ?: continue
+            counted++
+            if (forth.any { Geo.haversineMeters(it.lat, it.lon, b.lat, b.lon) <= RETRACE_M }) retraced++
+        }
+        if (counted == 0 || retraced.toDouble() / counted < RETRACE_MIN) {
+            // 되짚지 않는다 = 한 방향으로 도는 노선이다. 자르면 안 된다.
+            return listOf(ordered)
+        }
+        return listOf(ordered.subList(0, far + 1), back)
     }
 
     // ── 쓰기 ────────────────────────────────────────────────────
