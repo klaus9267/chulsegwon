@@ -304,7 +304,7 @@ def main():
 CALIB = 'data/calibration.json'
 
 # 흔들림을 무시하는 폭. 이보다 작게 움직이면 값을 바꾸지 않는다.
-DEADBAND_SEC = 4
+DEADBAND_SEC = 2
 DEADBAND_DETOUR = 0.01
 DEADBAND_FACTOR = 0.05
 DETOUR_DEFAULT = 1.07
@@ -375,7 +375,11 @@ def refit(ok, stamp):
     # "속도"와 "정류장당 시간"이 서로를 흉내낼 수 있고, 그래서 하나만 맞춘다.
     longs = [r for r in tr if spacing(r) >= LONG_SEG_M]
     if len(longs) >= 20:
-        newfac = min([round(1.0 + 0.05 * i, 2) for i in range(0, 41)],
+        # ⚠️ 1.0 아래도 봐야 한다. 처음엔 1.0~3.0 만 봤는데, 그건 "곡선이 낮다"는
+        # 가정을 코드에 박아둔 것이었다. 속도 관측 필터를 고치고 나니 긴 구간이
+        # 오히려 빨라져서(sectSpd 는 순간 주행속도라 램프·톨게이트를 안 담는다)
+        # 계수가 아래로 가야 하는데 갈 수가 없었다.
+        newfac = min([round(0.40 + 0.05 * i, 2) for i in range(0, 53)],
                      key=lambda f: stats(longs, dw, f)[1])
     else:
         newfac = fac

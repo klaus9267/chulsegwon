@@ -136,7 +136,31 @@ object Gtfs {
 
     /** GPS 잡음을 자른다. 실제로 200km/h 짜리 구간이 찍힌다. */
     private const val MIN_KMH = 5.0
-    private const val MAX_KMH = 80.0
+
+    /**
+     * 이 속도보다 빠른 관측은 잡음으로 보고 버린다 — **구간 길이에 따라 다르다.**
+     *
+     * 처음엔 80km/h 하나로 잘랐다. 짧은 구간에는 맞는 값인데 고속 구간에서는
+     * 관측을 통째로 버린다. 원자료를 세어보면:
+     *
+     * ```
+     * 3,500~6,000m   287개 중 185개(64.5%) 버림 · 중앙 95 → 31 km/h
+     * 6,000~10,000m  204개 중 173개(84.8%) 버림 · 중앙 86 → 63 km/h
+     * ```
+     *
+     * 즉 속도 곡선의 긴 쪽이 **남은 느린 꼬리**로만 만들어졌다. "3.5~6km 칸이
+     * 아래 칸보다 느린 건 표본이 적어서 생긴 잡음"이라고 보고 단조화로 눌렀던 게
+     * 사실은 이 필터가 만든 골짜기였다. 자기가 만든 왜곡을 잡음으로 오해한 것이다.
+     *
+     * 길이에 따라 다르게 자르는 근거는 물리다. 정류장 간격이 500m 인데 평균
+     * 60km/h 면 가감속만으로 불가능하다. 6km 짜리 고속도로 구간이라면 110km/h 도
+     * 잡음이 아니다.
+     */
+    private fun maxKmh(meters: Int): Double = when {
+        meters < 500 -> 60.0
+        meters < 1500 -> 80.0
+        else -> 110.0
+    }
 
     /**
      * 어떤 보정을 거쳐도 버스가 이보다 빠를 수는 없다(km/h).
@@ -236,10 +260,11 @@ object Gtfs {
                     for (s in segs) {
                         if (s.size < 3) continue
                         val kmh = s[2].toDouble()
-                        if (kmh < MIN_KMH || kmh > MAX_KMH) continue
+                        val meters = s[1].toInt()
+                        if (kmh < MIN_KMH || kmh > maxKmh(meters)) continue
                         val key = "$id:${s[0].toInt()}"
                         perSegment.getOrPut(key) { ArrayList(4) } += kmh.toInt()
-                        remember(key, s[1].toInt())
+                        remember(key, meters)
                     }
                 }
             }
