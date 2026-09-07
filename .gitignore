@@ -22,3 +22,13 @@ web/idx*.html
 data/raw/deals/
 data/raw/rent/
 .claude/launch.json
+
+# 버스·도보 수집물 (2026-09-07). 재수집 가능하고, 크고, 매일 바뀐다.
+# 특히 OSM PBF 는 317MB 라 한 번 들어가면 히스토리에서 못 뺀다.
+data/raw/osm/
+data/raw/bus/
+data/raw/bus-test/
+data/raw/seoul-bus/
+data/raw/seoul/
+data/raw/bus-collect.log
+data/logs/

@@ -48,6 +48,52 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "seoulbus" || opts["--mode"] == "seoulspeed") {
+        val key = System.getenv("DATA_GO_KR_KEY")
+            ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
+        val dir = File(opts["--out"] ?: "data/raw/seoul-bus")
+        if (opts["--mode"] == "seoulbus") SeoulBus.collect(key, dir) else SeoulBus.snapshot(key, dir)
+        return
+    }
+
+    if (opts["--mode"] == "gtfscheck") {
+        GtfsCheck.run(File(opts["--in"] ?: "data/out/gtfs-seoul-gyeonggi.zip"))
+        return
+    }
+
+    if (opts["--mode"] == "gtfs") {
+        Gtfs.export(
+            gyeonggiDir = File(opts["--gyeonggi"] ?: "data/raw/bus"),
+            seoulDir = File(opts["--seoul"] ?: "data/raw/seoul-bus"),
+            outFile = File(opts["--out"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "osmfetch") {
+        Overpass.fetch(File(opts["--out"] ?: "data/raw/osm/tiles"))
+        return
+    }
+
+    if (opts["--mode"] == "walk") {
+        val bb = opts["--bbox"]?.split(",")?.map { it.trim().toDouble() }
+        Walk.build(
+            pbf = File(opts["--pbf"] ?: "data/raw/osm/south-korea.osm.pbf"),
+            outDir = File(opts["--out"] ?: "data/raw/osm"),
+            bbox = bb?.let { Walk.Bbox(it[0], it[1], it[2], it[3]) },
+            check = opts.containsKey("--check"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "bus") {
+        val key = System.getenv("DATA_GO_KR_KEY")
+            ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
+        val cities = opts["--cities"]?.split(",")?.map { it.trim() } ?: Bus.GYEONGGI
+        Bus.run(key, cities, File(opts["--out"] ?: "data/raw/bus"))
+        return
+    }
+
     if (opts["--mode"] == "elevation") {
         Elevation.run(
             manifestFile = File(opts["--manifest"] ?: "web/public/data/manifest.json"),
