@@ -148,7 +148,27 @@ object Gtfs {
      */
     private const val CEILING_KMH = 95.0
 
-    private class Stop(val id: String, val name: String, val lat: Double, val lon: Double)
+    private class Stop(val id: String, val name: String, val lat: Double, val lon: Double) {
+        /**
+         * 버스가 **서지 않는** 지점인가.
+         *
+         * 원자료의 경유 목록에는 정류장이 아닌 것이 섞여 있다 —
+         * `양재IC(미정차)`, `서울TG(미정차)`, `금토JC(미정차)`, `GS주유소(가상)`.
+         * 노선 모양을 그리기 위한 **형상점**이지 승하차 지점이 아니다.
+         *
+         * 경기 경유 148,352개 중 11,409개(7.7%), 서울 88,885개 중 10,400개(11.7%) 다.
+         * 이걸 정류장으로 넣고 정차시간을 물리면 산출물에 **가짜 정차 30,173행**이
+         * 생기고, 정류장당 61초면 511시간이 통째로 없는 시간이 된다.
+         *
+         * 게다가 이런 지점은 고속도로 구간에 몰려 있어서 **광역·직행좌석만 골라
+         * 느리게** 만든다. 카카오 대조에서 광역급행 편향 +660초가 나온 게 그것이고,
+         * 그걸 속도 배율로 덮으려다 시속 103km 짜리 버스를 만들 뻔했다.
+         * 원인을 안 보고 계수로 맞추면 이렇게 된다.
+         *
+         * 거리는 살리고 정차만 뺀다 — 버스는 그 지점을 **지나가긴** 한다.
+         */
+        val passThrough: Boolean = name.contains("(미정차)") || name.contains("(가상)")
+    }
 
     /** 하나의 방향 운행. `dists[k]` 는 `stops[k-1] → stops[k]` 거리(m), 없으면 -1. */
     private class Trip(
@@ -593,20 +613,15 @@ object Gtfs {
         var measured = 0
         var modelled = 0
         var estimated = 0
+        // stops.txt 는 실제로 정차하는 곳만 담는다. 형상점은 시간 계산에만 쓴다.
+        val used = HashSet<String>(stops.size)
+        var skinny = 0
 
         ZipOutputStream(outFile.outputStream().buffered(1 shl 20)).use { zip ->
 
             entry(zip, "agency.txt",
                 "agency_id,agency_name,agency_url,agency_timezone,agency_lang\n" +
                     "chulsegwon,출세권 수집분 (서울·경기 버스),https://klaus9267.github.io/chulsegwon/,Asia/Seoul,ko\n")
-
-            entry(zip, "stops.txt", buildString {
-                append("stop_id,stop_name,stop_lat,stop_lon\n")
-                for (s in stops.values) {
-                    append(s.id).append(',').append(csv(s.name)).append(',')
-                        .append(s.lat).append(',').append(s.lon).append('\n')
-                }
-            })
 
             entry(zip, "routes.txt", buildString {
                 append("route_id,agency_id,route_short_name,route_long_name,route_type\n")
@@ -652,7 +667,9 @@ object Gtfs {
                         // 대조로 잰 배율로 올린다 (자세한 이유는 Calibration 을 볼 것).
                         if (meters >= cal.longSegmentMeters) kmh *= cal.longSegmentSpeedFactor
                         kmh = kmh.coerceAtMost(CEILING_KMH)
-                        sec += (meters / (kmh * 1000.0 / 3600.0)).toInt() + cal.dwellSec
+                        sec += (meters / (kmh * 1000.0 / 3600.0)).toInt()
+                        // 형상점은 지나가는 시간만 더하고 정차시간은 안 붙인다
+                        if (stops[t.stops[k]]?.passThrough != true) sec += cal.dwellSec
                     }
                     times += sec
                 }
@@ -662,12 +679,17 @@ object Gtfs {
                     tripRows.append(t.routeId).append(',').append(sv.first).append(',')
                         .append(tripId).append(',').append(t.dir).append('\n')
                     // GTFS 는 stop_times 가 trip_id 로 묶여 있어 운행마다 한 벌씩 필요하다.
+                    var order = 0
                     for (k in t.stops.indices) {
+                        // 형상점은 stop_times 에 넣지 않는다 (Stop.passThrough 를 볼 것)
+                        if (stops[t.stops[k]]?.passThrough != false) continue
                         val hhmmss = hms(times[k])
                         stopTimes.append(tripId).append(',').append(hhmmss).append(',')
                             .append(hhmmss).append(',').append(t.stops[k]).append(',')
-                            .append(k + 1).append('\n')
+                            .append(++order).append('\n')
+                        used += t.stops[k]
                     }
+                    if (order < 2) skinny++
                     // exact_times=0 : 시각표가 아니라 "이 간격으로 다닌다"는 뜻
                     freqs.append(tripId).append(',').append(hm(r.first)).append(',')
                         .append(hmAfter(r.last, r.first)).append(',')
@@ -675,10 +697,18 @@ object Gtfs {
                 }
             }
 
+            entry(zip, "stops.txt", buildString {
+                append("stop_id,stop_name,stop_lat,stop_lon\n")
+                for (s in stops.values) {
+                    if (s.id !in used) continue
+                    append(s.id).append(',').append(csv(s.name)).append(',')
+                        .append(s.lat).append(',').append(s.lon).append('\n')
+                }
+            })
             entry(zip, "trips.txt", tripRows.toString())
             entry(zip, "stop_times.txt", stopTimes.toString())
             entry(zip, "frequencies.txt", freqs.toString())
-            entry(zip, "transfers.txt", transfers(stops))
+            entry(zip, "transfers.txt", transfers(stops.filterKeys { it in used }))
         }
 
         val total = measured + modelled + estimated
@@ -686,6 +716,8 @@ object Gtfs {
         println("      구간 소요시간: 실측 ${"%,d".format(measured)} · 곡선 ${"%,d".format(modelled)}" +
             " · 고정표 ${"%,d".format(estimated)} (실측 ${"%.1f".format(pct)}%)")
         if (guessed > 0) println("      배차를 몰라 유형 중앙값으로 채운 횟수 ${"%,d".format(guessed)}")
+        println("      형상점(미정차·가상) 뺀 뒤 정류장 ${"%,d".format(used.size)}" +
+            (if (skinny > 0) " · 정류장이 2개 미만이 된 운행 ${skinny}개" else ""))
         println("      -> ${outFile.absolutePath}  ${"%,d".format(outFile.length() / 1024)}KB")
     }
 

@@ -135,9 +135,15 @@ def find(by_no, stops, coord, no, frm, to, nstops=None):
     if not cands:
         return None, ('노선없음' if no not in by_no else '구간없음')
     if nstops:
-        # 정류장 수가 카카오와 같은 후보를 고른다. 세는 방식이 1 차이날 수 있어
-        # ±1 까지 같은 급으로 보고, 그 안에서는 가장 짧은 것을 고른다.
-        best = min(cands, key=lambda c: (abs(c[0] - nstops) > 1, abs(c[0] - nstops), c[1]))
+        # 카카오의 n 은 **구간 수**(중간 정류장 + 1)고 우리 것은 **정류장 수**다.
+        # 실제로 매칭된 830건 중 747건(90%)이 정확히 +1 차이였다. 예전엔 ±1 허용치가
+        # 이 계통 오차를 가려주고 있었는데, 가려진 채로는 후보 선택이 흐릿해진다.
+        want = nstops + 1
+        best = min(cands, key=lambda c: (abs(c[0] - want) > 1, abs(c[0] - want), c[1]))
+        # 정류장 수가 두 배쯤 차이나면 같은 구간이 아니다. 억지로 붙이면 그 값이
+        # 편향 통계와 보정에 그대로 들어간다 — 찾은 걸로 세지 않는 게 낫다.
+        if abs(best[0] - want) > max(2, want // 2):
+            return None, '정류장수 불일치'
         return best, None
     return min(cands, key=lambda c: c[0]), None
 
