@@ -3,8 +3,8 @@
  "detour": 1.066,
  "longSegmentMeters": 1500.0,
  "longSegmentSpeedFactor": 1.1,
- "note": "카카오 구간 984개 · 2026-09-07 23:41 · 평가셋 편향 -3초 · MAE 156초 · ±3분 71%",
- "fittedAt": "2026-09-07 23:41",
+ "note": "카카오 구간 984개 · 2026-09-07 23:44 · 평가셋 편향 -3초 · MAE 156초 · ±3분 71%",
+ "fittedAt": "2026-09-07 23:44",
  "sample": 984,
  "holdout": {
   "bias": -3,

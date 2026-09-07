@@ -126,6 +126,8 @@ $zip = Get-Item 'data/out/gtfs-seoul-gyeonggi.zip' -ErrorAction SilentlyContinue
 $last = $lastGtfs   # Step 이 채워둔 마지막 출력
 $m = [regex]::Match($last, '실측 ([\d,]+) · 곡선 ([\d,]+) · 고정표 ([\d,]+) \(실측 ([\d.]+)%')
 $s2 = [regex]::Match($last, '정류장 ([\d,]+) · 노선 ([\d,]+) · 운행 ([\d,]+)')
+# 형상점(미정차·가상)을 뺀 뒤가 실제로 파일에 들어간 정류장 수다. 앞 줄은 내부 집계다.
+$pub = [regex]::Match($last, '형상점.*?정류장 ([\d,]+)')
 # 속도 곡선도 남긴다. 실측 비율은 서울 자체노선에만 sectSpd 가 있어서 ~17% 에서
 # 멈추지만, 스냅샷이 쌓이면서 실제로 좋아지는 건 이 곡선이다. 값이 흔들리다 멎으면
 # 표본이 충분해진 것이고, 그때가 수집을 줄여도 되는 시점이다.
@@ -135,7 +137,7 @@ $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}' -f `
     (Get-Date -Format 'yyyy-MM-dd HH:mm'), $snapCount,
     $(if ($m.Success) { $m.Groups[1].Value -replace ',','' } else { '' }),
     $(if ($m.Success) { $m.Groups[4].Value } else { '' }),
-    $(if ($s2.Success) { $s2.Groups[1].Value -replace ',','' } else { '' }),
+    $(if ($pub.Success) { $pub.Groups[1].Value -replace ',','' } elseif ($s2.Success) { $s2.Groups[1].Value -replace ',','' } else { '' }),
     $(if ($s2.Success) { $s2.Groups[2].Value -replace ',','' } else { '' }),
     $(if ($s2.Success) { $s2.Groups[3].Value -replace ',','' } else { '' }),
     $(if ($zip) { [int]($zip.Length / 1KB) } else { '' }),
