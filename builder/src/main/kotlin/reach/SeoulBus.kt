@@ -102,15 +102,25 @@ object SeoulBus {
     }
 
     /**
-     * 구간 속도 스냅샷 하나.
+     * 구간 속도 스냅샷 하나. **노선 일부만** 찍는다.
      *
      * 노선마다 `getStaionByRoute` 를 한 번 부르면 그 순간 전 구간의 속도가 온다.
-     * 시각을 붙여 append 만 한다 — 나중에 시간대별로 묶어 평균을 낸다.
+     * 시각을 붙여 append 만 하고, 나중에 시간대별로 묶어 중앙값을 낸다.
      *
-     * 스케줄러가 시간대마다 이걸 부른다. 한 번에 노선 1,363개면 약 1분이고,
-     * 하루 6번이면 8,178 요청이라 일일 한도(10,000) 안에 든다.
+     * ⚠️ **한 번에 전 노선을 부르면 안 된다.** 처음엔 그렇게 했는데 일일 한도가
+     * 문서에 적힌 10,000 이 아니라 관측상 약 2,000 이었다. 자정 실행이 1,361개를
+     * 먹고, 08:00 은 627개에서 잘리고, 12:00·15:00·18:30 은 0건이 됐다.
+     * **낮과 퇴근 시간대가 한 번도 안 찍혔다 — 정작 그걸 재려고 만든 스케줄인데.**
+     *
+     * 그래서 한 번에 [limit] 개씩만, 매번 다른 구간을 돌아가며 찍는다.
+     * 5회 × 380개 = 1,900 이라 한도 안에 들고 5개 시간대가 매일 표본을 얻는다.
+     * 전 노선을 한 바퀴 도는 데 3~4일이 걸리지만, **시간대별 대표성이 전 노선
+     * 동시 관측보다 중요하다** — 우리가 재려는 건 "이 노선이 몇 시에 얼마나
+     * 느려지는가"이지 "지금 이 순간 전 노선의 속도"가 아니다.
+     *
+     * 커서는 파일에 남긴다. 실행이 걸러지거나 실패해도 다음 실행이 이어받는다.
      */
-    fun snapshot(key: String, outDir: File) {
+    fun snapshot(key: String, outDir: File, limit: Int = 380) {
         outDir.mkdirs()
         val mapper = ObjectMapper().registerKotlinModule()
         val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build()
@@ -118,12 +128,22 @@ object SeoulBus {
         require(routes.isNotEmpty()) { "노선 목록이 없다. 먼저 --mode seoulbus 를 돌릴 것" }
 
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
-        val out = File(File(outDir, "speed"), "$stamp.jsonl")
-        out.parentFile.mkdirs()
+        val speedDir = File(outDir, "speed")
+        speedDir.mkdirs()
+        val out = File(speedDir, "$stamp.jsonl")
+
+        // 이번에 찍을 몫. 커서를 돌려 매번 다른 구간을 맡는다.
+        val cursorFile = File(speedDir, "cursor.txt")
+        val start = (cursorFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull() ?: 0)
+            .mod(routes.size)
+        val take = if (limit <= 0 || limit >= routes.size) routes
+        else (0 until limit).map { routes[(start + it) % routes.size] }
+        println("      이번 몫: ${take.size}개 (${start} 번째부터) / 전체 ${routes.size}")
 
         var n = 0
         var rows = 0
-        for (r in routes) {
+        val lines = ArrayList<Map<String, Any?>>(take.size)
+        for (r in take) {
             val id = r["id"] as? String ?: continue
             val xml = fetch(client, "$B/busRouteInfo/getStaionByRoute?serviceKey=$key&busRouteId=$id")
                 ?: continue
@@ -134,12 +154,22 @@ object SeoulBus {
                 if (v <= 0 || d <= 0) null else intArrayOf(ord, d, v).toList()
             }
             if (spd.isNotEmpty()) {
-                appendAll(out, listOf(mapOf("id" to id, "s" to spd)), mapper)
+                lines += mapOf("id" to id, "s" to spd)
                 rows += spd.size
             }
             n++
             Thread.sleep(35)
         }
+        // 빈 스냅샷은 쓰지 않는다. 한도에 막혀 0건이 나온 파일이 쌓이면
+        // "스냅샷 몇 개"라는 지표가 거짓말이 된다.
+        if (lines.isEmpty()) {
+            // 커서를 안 옮긴다. 옮기면 한도에 막힌 몫을 영영 건너뛴다.
+            println("      스냅샷 $stamp · 받은 게 없다 (한도 초과) — 파일도 커서도 안 건드린다")
+            return
+        }
+        // 실제로 받은 만큼만 전진한다. 중간에 한도가 걸려도 다음 실행이 거기서 이어받는다.
+        cursorFile.writeText(((start + n) % routes.size).toString())
+        appendAll(out, lines, mapper)
         println("      스냅샷 $stamp · 노선 $n · 구간 ${"%,d".format(rows)} -> ${out.name}")
     }
 

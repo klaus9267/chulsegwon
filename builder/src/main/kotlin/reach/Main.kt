@@ -52,7 +52,8 @@ fun main(args: Array<String>) {
         val key = System.getenv("DATA_GO_KR_KEY")
             ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
         val dir = File(opts["--out"] ?: "data/raw/seoul-bus")
-        if (opts["--mode"] == "seoulbus") SeoulBus.collect(key, dir) else SeoulBus.snapshot(key, dir)
+        if (opts["--mode"] == "seoulbus") SeoulBus.collect(key, dir)
+        else SeoulBus.snapshot(key, dir, limit = (opts["--limit"] ?: "380").toInt())
         return
     }
 
