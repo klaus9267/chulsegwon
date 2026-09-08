@@ -84,10 +84,22 @@ object SubwayGtfs {
             val stopTimes = StringBuilder("trip_id,arrival_time,departure_time,stop_id,stop_sequence\n")
             val freqs = StringBuilder("trip_id,start_time,end_time,headway_secs,exact_times\n")
 
+            var loopTrips = 0
             for ((line, chains) in network.lineSequences()) {
                 val multiplier = Headways.multiplierFor(line)
+                // 체인마다, 그리고 그 안에 순환 구간이 있으면 두 바퀴짜리를 하나 더.
+                val runs = ArrayList<Pair<String, List<Int>>>()
                 for ((ci, chain) in chains.withIndex()) {
                     if (chain.size < 2) continue
+                    runs += "$ci" to chain
+                    val loop = circularPart(chain)
+                    if (loop != null) {
+                        // 두 바퀴. 절단점을 가로지르는 통행이 여기서 표현된다.
+                        runs += "${ci}c" to (loop + loop.drop(1))
+                        loopTrips++
+                    }
+                }
+                for ((ci, chain) in runs) {
                     for ((di, dir) in listOf(chain, chain.asReversed()).withIndex()) {
                         val tripId = "L${safe(line)}_${ci}_$di"
                         tripRows.append("L").append(safe(line)).append(",WD,")
@@ -117,6 +129,7 @@ object SubwayGtfs {
                 }
             }
 
+            if (loopTrips > 0) println("      순환 구간을 두 바퀴로 따로 내보낸 노선 ${loopTrips}개")
             entry(zip, "trips.txt", tripRows.toString())
             entry(zip, "stop_times.txt", stopTimes.toString())
             entry(zip, "frequencies.txt", freqs.toString())
@@ -136,6 +149,22 @@ object SubwayGtfs {
         println("      운행 ${"%,d".format(trips)} · 정차 ${"%,d".format(stopTimeRows)}" +
             " · 배차 ${"%,d".format(freqRows)} · 환승 ${"%,d".format(network.transferEdges.size)}")
         println("      -> ${outFile.absolutePath}  ${"%,d".format(outFile.length() / 1024)}KB")
+    }
+
+    /**
+     * 체인 안의 순환 구간을 찾는다. 없으면 null.
+     *
+     * 같은 노드가 두 번 나오면 그 사이가 한 바퀴다. 2호선 체인은
+     * `까치산…도림천 [신도림 …한 바퀴… 신도림]` 이라 신도림이 두 번 나온다.
+     */
+    private fun circularPart(chain: List<Int>): List<Int>? {
+        val seen = HashMap<Int, Int>(chain.size * 2)
+        for ((i, v) in chain.withIndex()) {
+            val first = seen.putIfAbsent(v, i)
+            // 한 바퀴로 치려면 충분히 길어야 한다. 2~3개짜리 되돌이는 순환이 아니다.
+            if (first != null && i - first >= 8) return chain.subList(first, i + 1)
+        }
+        return null
     }
 
     private fun key(a: Int, b: Int): Long = a.toLong() * 1_000_000L + b
