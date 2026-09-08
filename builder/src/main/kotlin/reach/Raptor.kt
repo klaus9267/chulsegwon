@@ -128,34 +128,14 @@ class Raptor(private val d: TransitData) {
         while (k < w.size) {
             val start = w[k]; val end = w[k + 1]; val head = w[k + 2]
             k += 3
-            val base = start + phase(p, head)
-            // base + m*head + off >= ready 인 최소 m (m >= 0)
-            val need = ready - off - base
+            // start 에는 노선별 위상이 이미 구워져 있다 (TransitData.load 를 볼 것).
+            // start + m*head + off >= ready 인 최소 m (m >= 0)
+            val need = ready - off - start
             val m = if (need <= 0) 0 else (need + head - 1) / head
-            val t = base + m * head
+            val t = start + m * head
             if (t <= end && t < bestStart) bestStart = t
         }
         return bestStart
     }
 
-    /**
-     * 노선마다 출발 위상을 다르게 준다.
-     *
-     * **없으면 환승이 공짜가 된다.** GTFS `frequencies` 는 창 시작시각부터 배차마다
-     * 출발한다. 그런데 우리 지하철 창은 모든 노선이 05:30·07:00·09:00… 로 똑같이
-     * 시작하고, 버스도 첫차가 05:00 에 몰려 있다. 그대로 두면 전 노선이 같은 순간에
-     * 출발해서, 갈아탈 때 기다리는 시간이 0 이 된다. 실제 수도권 노선들은 서로
-     * 시각을 맞추지 않는다.
-     *
-     * 노선 번호에서 결정론적으로 뽑는다 — 매번 같은 값이라 결과가 재현된다.
-     * (합성 시간표의 위상 정렬([ADR-6])과 목적이 같다. 거기선 **타고 지나가는**
-     * 승객의 대기를 0 으로 만드는 게 목적이었는데, RAPTOR 는 같은 패턴에 머무르면
-     * 애초에 다시 안 타므로 그건 저절로 된다. 여기서 필요한 건 반대쪽 —
-     * **새로 타는** 승객이 제대로 기다리게 하는 것이다.)
-     */
-    private fun phase(pattern: Int, headway: Int): Int {
-        var h = pattern * -1640531527          // Knuth 곱셈 해시
-        h = h xor (h ushr 15)
-        return Math.floorMod(h, headway)
-    }
 }

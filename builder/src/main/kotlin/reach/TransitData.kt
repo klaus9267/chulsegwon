@@ -117,7 +117,26 @@ class TransitData(
                         val base = stops[0].second
                         pStops += IntArray(stops.size) { stops[it].first }
                         pOffs += IntArray(stops.size) { stops[it].second - base }
-                        pWins += w.toIntArray()
+                        // 창의 시작에 **노선별 위상**을 미리 더해둔다. 안 그러면 전
+                        // 노선이 같은 순간에 출발해 환승 대기가 0 이 된다(우리 지하철
+                        // 창은 전부 05:30·07:00… 로 같고 버스 첫차도 05:00 에 몰려 있다).
+                        // 탐색 때 계산하지 않고 여기서 굽는 이유는 시간축을 뒤집어도
+                        // 같은 시간표를 보게 하기 위해서다.
+                        val ph = phaseOf(trip)
+                        val win = IntArray(w.size)
+                        var k = 0
+                        while (k < w.size) {
+                            val head = w[k + 2]
+                            val start = w[k] + Math.floorMod(ph, head)
+                            win[k] = start
+                            // 마지막으로 실제 출발하는 시각까지만 창으로 둔다.
+                            // 뒤집을 때 그 값이 그대로 시작점이 된다.
+                            win[k + 1] = if (w[k + 1] < start) start
+                            else start + ((w[k + 1] - start) / head) * head
+                            win[k + 2] = head
+                            k += 3
+                        }
+                        pWins += win
                         pRoute += tripRoute[trip] ?: ""
                     }
 
@@ -155,6 +174,19 @@ class TransitData(
                 transfers = Array(n) { trAcc[it].toIntArray() },
                 patternRoute = pRoute.toTypedArray(),
             )
+        }
+
+        /**
+         * 노선 이름에서 뽑는 결정론적 위상 씨앗.
+         *
+         * 실제 수도권 노선들은 서로 시각을 맞추지 않는다. 같은 값이 매번 나와야
+         * 결과가 재현되므로 난수가 아니라 이름 해시를 쓴다.
+         */
+        private fun phaseOf(trip: String): Int {
+            var h = 0
+            for (c in trip) h = h * 31 + c.code
+            h = h xor (h ushr 15)
+            return h and 0x3FFFFFF
         }
 
         /** `25:30:00` 처럼 24를 넘는 표기를 허용한다. */
@@ -232,6 +264,56 @@ class TransitData(
         }
         transfers = Array(stopCount) { out[it].toIntArray() }
         return added
+    }
+
+    /**
+     * 시간축을 뒤집은 망.
+     *
+     * 연결 (A→B, 출발 d, 도착 a) 를 (B→A, 출발 −a, 도착 −d) 로 바꾼다.
+     * 그러면 "T 까지 도착" 문제가 "−T 에 출발" 문제가 되어 같은 코드로 풀린다.
+     *
+     * 패턴 하나는 정류장 열과 상대시각(offset), 그리고 출발 기준시각의 집합
+     * {start + m·headway} 로 표현된다. 뒤집으면:
+     * * 정류장 열이 거꾸로
+     * * offset' = offLast − offset (거꾸로)
+     * * 기준시각' = −(기준시각 + offLast) — 집합이 그대로 등차수열이라 창으로 표현된다
+     */
+    fun mirrored(): TransitData {
+        val n = patternCount
+        val ms = Array(n) { p -> patternStops[p].reversedArray() }
+        val mo = Array(n) { p ->
+            val o = patternOffsets[p]
+            val last = o[o.size - 1]
+            IntArray(o.size) { last - o[o.size - 1 - it] }
+        }
+        val mw = Array(n) { p ->
+            val o = patternOffsets[p]
+            val last = o[o.size - 1]
+            val w = patternWindows[p]
+            val out = IntArray(w.size)
+            var k = 0
+            while (k < w.size) {
+                // 정방향 기준시각은 [start, end] 를 headway 로 훑는다(end 는 실제 마지막
+                // 출발이라 정확히 등차수열의 끝이다). 뒤집으면 순서가 반대가 된다.
+                out[k] = -(w[k + 1] + last)
+                out[k + 1] = -(w[k] + last)
+                out[k + 2] = w[k + 2]
+                k += 3
+            }
+            out
+        }
+        val at = Array(stopCount) { ArrayList<Int>(4) }
+        for (p in 0 until n) {
+            val ss = ms[p]
+            for (i in ss.indices) at[ss[i]].add(pack(p, i))
+        }
+        return TransitData(
+            stopIds, stopNames, stopLat, stopLon,
+            ms, mo, mw,
+            Array(stopCount) { at[it].toIntArray() },
+            transfers,          // 도보는 방향이 없다
+            patternRoute,
+        )
     }
 
     fun describe(): String =

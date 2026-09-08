@@ -77,12 +77,19 @@ fun main(args: Array<String>) {
         require(origins.isNotEmpty()) { "출발 정류장을 못 찾았다: $fromName" }
         println("      출발 '$fromName' 정류장 ${origins.size}개")
 
-        val depart = parseHm(opts["--at"] ?: "08:00")
+        val at = parseHm(opts["--at"] ?: "08:00")
         val cap = (opts["--budget"] ?: "90").toInt()
-        val r = Raptor(data)
+        // 출근은 "T 까지 도착"이라 시간축을 뒤집는다. 그러면 동네 1,768개에서
+        // 직장 하나로 가는 many-to-one 이 직장 하나에서 나가는 one-to-many 가 된다.
+        val arriveBy = (opts["--direction"] ?: "depart") == "arrive"
+        val net = if (arriveBy) data.mirrored() else data
+        val depart = if (arriveBy) -at else at
+        val seed = origins.keys.associateWith { depart }
+        val r = Raptor(net)
         val t1 = System.currentTimeMillis()
-        val best = r.run(origins, depart + cap * 60)
-        println("      탐색 ${System.currentTimeMillis() - t1}ms")
+        val best = r.run(seed, depart + cap * 60)
+        println("      탐색 ${System.currentTimeMillis() - t1}ms" +
+            (if (arriveBy) "  (${opts["--at"] ?: "08:00"} 까지 도착 기준)" else "  (출발 기준)"))
 
         val reach = best.count { it < Raptor.INF }
         println("      ${cap}분 안에 닿는 정류장 ${"%,d".format(reach)} / ${"%,d".format(data.stopCount)}")
@@ -222,6 +229,18 @@ fun main(args: Array<String>) {
         "구간 ${network.trackEdges.size} / 환승 ${network.transferEdges.size}")
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
+
+    if (opts["--mode"] == "dongmatrix") {
+        DongMatrix.build(
+            network = network,
+            subwayGtfs = File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
+            busGtfs = File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            dongsJson = File(opts["--dongs"] ?: "web/public/data/dongs.json"),
+            outDir = File(opts["--out"] ?: "data/out/reach2"),
+            capMinutes = (opts["--cap"] ?: "120").toInt(),
+        )
+        return
+    }
 
     if (opts["--mode"] == "gtfssubway") {
         SubwayGtfs.export(network, File(opts["--out"] ?: "data/out/gtfs-subway.zip"))
