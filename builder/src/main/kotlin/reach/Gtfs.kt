@@ -60,6 +60,7 @@ object Gtfs {
      * 그쪽을 쓴다. 이 값도 보정 파일이 덮어쓴다.
      */
     private const val DETOUR_DEFAULT = 1.07
+    private const val DETOUR_GG_DEFAULT = 1.10
 
     /**
      * 되짚음 판정: 뒷조각 정류장이 앞조각 정류장의 이 거리 안이면 "같은 길을 되짚었다".
@@ -110,7 +111,16 @@ object Gtfs {
      */
     private class Calibration(
         val dwellSec: Int,
+        /**
+         * 좌표 직선거리를 도로거리로 보정하는 배율.
+         *
+         * 서울과 경기가 다르다. 카카오 도로거리와 대보니 **서울 1.065 · 경기 1.101**
+         * 인데 전역값 하나(1.066)를 쓰고 있었다. 서울은 API 가 실제 도로거리를 주므로
+         * 이 값이 쓰이는 곳이 27% 뿐이고, 정작 구속력을 갖는 경기 전 구간이
+         * 과소평가되고 있었다.
+         */
         val detour: Double,
+        val detourGyeonggi: Double,
         /**
          * 긴 구간에서 속도를 올리는 배율과 그 경계(m).
          *
@@ -131,14 +141,16 @@ object Gtfs {
 
     private fun loadCalibration(f: File): Calibration {
         if (!f.exists()) return Calibration(
-            DWELL_SEC_DEFAULT, DETOUR_DEFAULT, LONG_SEG_M_DEFAULT, LONG_SEG_FACTOR_DEFAULT,
-            "기본값 (보정 파일 없음)")
+            DWELL_SEC_DEFAULT, DETOUR_DEFAULT, DETOUR_GG_DEFAULT,
+            LONG_SEG_M_DEFAULT, LONG_SEG_FACTOR_DEFAULT, "기본값 (보정 파일 없음)")
         return try {
             @Suppress("UNCHECKED_CAST")
             val m = ObjectMapper().readValue(f, Map::class.java) as Map<String, Any?>
             Calibration(
                 (m["dwellSec"] as? Number)?.toInt() ?: DWELL_SEC_DEFAULT,
                 (m["detour"] as? Number)?.toDouble() ?: DETOUR_DEFAULT,
+                (m["detourGyeonggi"] as? Number)?.toDouble()
+                    ?: (m["detour"] as? Number)?.toDouble() ?: DETOUR_GG_DEFAULT,
                 (m["longSegmentMeters"] as? Number)?.toDouble() ?: LONG_SEG_M_DEFAULT,
                 (m["longSegmentSpeedFactor"] as? Number)?.toDouble() ?: LONG_SEG_FACTOR_DEFAULT,
                 m["note"] as? String ?: f.name,
@@ -146,8 +158,8 @@ object Gtfs {
         } catch (e: Exception) {
             // 보정 파일이 깨졌다고 생성이 멈추면 안 된다. 기본값으로 계속 간다.
             System.err.println("      ! 보정 파일을 못 읽었다 (${e.message}) — 기본값을 쓴다")
-            Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, LONG_SEG_M_DEFAULT,
-                LONG_SEG_FACTOR_DEFAULT, "기본값 (보정 파일 손상)")
+            Calibration(DWELL_SEC_DEFAULT, DETOUR_DEFAULT, DETOUR_GG_DEFAULT,
+                LONG_SEG_M_DEFAULT, LONG_SEG_FACTOR_DEFAULT, "기본값 (보정 파일 손상)")
         }
     }
 
@@ -217,8 +229,33 @@ object Gtfs {
         val dir: Int, val stops: List<String>, val ords: List<Int>, val dists: List<Int>,
     )
 
+    /**
+     * 서울 API 의 노선명에서 **번호와 꼬리표를 가른다**.
+     *
+     * 서울 TOPIS 는 `busRouteNm` 에 식별용 한글을 덧붙여 준다 —
+     * 도시명(`1300인천`), 행선지(`110A고려대`), 시간대(`8773출근`).
+     * 1,363개 중 607개(44.5%)가 그렇다.
+     *
+     * 그대로 `route_short_name` 에 실으면 **공개 GTFS 로서 틀린 값**이다 —
+     * 정류장 안내판에 `1300인천` 이라고 적혀 있지 않다. 꼬리는 `route_long_name`
+     * 으로 옮긴다. 정보를 버리는 게 아니라 자리를 바로잡는 것이다.
+     *
+     * 뒤에서부터 한글만 떼되, 떼고 남은 게 비거나 숫자·영문이 없으면 그대로 둔다 —
+     * `반디1`·`가평2`·`광역급행` 처럼 이름 자체가 한글인 노선이 있다.
+     */
+    private fun splitRouteName(v: String): Pair<String, String> {
+        var i = v.length
+        while (i > 0 && v[i - 1] in '가'..'힣') i--
+        val head = v.substring(0, i)
+        if (i == 0 || i == v.length) return v to ""
+        if (head.none { it.isDigit() || it in 'A'..'Z' || it in 'a'..'z' }) return v to ""
+        return head to v.substring(i)
+    }
+
     private class Route(
         val id: String, val no: String, val type: String,
+        /** 번호에서 떼어낸 꼬리표(도시명·행선지·출퇴근). 없으면 빈 문자열. */
+        val tail: String = "",
         val first: String, val last: String,
         val hwWeekday: Int?, val hwSat: Int?, val hwSun: Int?,
     )
@@ -398,7 +435,8 @@ object Gtfs {
 
     fun export(gyeonggiDir: File, seoulDir: File, outFile: File, calibrationFile: File) {
         val cal = loadCalibration(calibrationFile)
-        println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 ×${"%.3f".format(cal.detour)}" +
+        println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 서울 ×${"%.3f".format(cal.detour)}" +
+            " 경기 ×${"%.3f".format(cal.detourGyeonggi)}" +
             " · ${cal.longSegmentMeters.toInt()}m↑ 속도 ×${"%.2f".format(cal.longSegmentSpeedFactor)}" +
             " — ${cal.note}")
         val mapper = ObjectMapper().registerKotlinModule()
@@ -474,8 +512,9 @@ object Gtfs {
             val gid = listOf("GGGB$src", "GICB$src").firstOrNull { routes.containsKey(it) }
             if (gid != null) { handover[src] = gid; continue }
             val hw = (r["headway"] as? Number)?.toInt()
+            val (num, tail) = splitRouteName(r["no"] as? String ?: "")
             routes["S$src"] = Route(
-                id = "S$src", no = r["no"] as? String ?: "", type = seoulType(r["type"] as? String),
+                id = "S$src", no = num, type = seoulType(r["type"] as? String), tail = tail,
                 first = hhmm(r["first"] as? String) ?: "0500",
                 last = hhmm(r["last"] as? String) ?: "2300",
                 // 서울은 요일별 배차를 안 준다. 한 값을 세 요일에 그대로 쓴다.
@@ -507,9 +546,28 @@ object Gtfs {
                 stops.putIfAbsent(sid, Stop(sid, s["name"] as? String ?: sid, la, lo))
             }
             // 서울은 `direction`(종점 이름)이 온다. 방향별로 운행을 나눈다.
-            for ((di, group) in list.groupBy { it["dir"] as? String ?: "" }.values.withIndex()) {
-                val o = group.filter { (it["lat"] as? Number)?.toDouble() ?: 0.0 > 0.0 }
-                    .sortedBy { (it["ord"] as? Number)?.toInt() ?: 0 }
+            //
+            // ⚠️ 경계 정류장을 **양쪽 그룹에 다 넣는다.** `groupBy` 로 뚝 자르면
+            // 방향이 바뀌는 지점에서 타는 승차가 통째로 사라진다 — 카카오 대조에서
+            // 그런 구간이 관측됐다. 경기 반환점 자르기는 이미 `subList(far, size)` 로
+            // 공유하는데 서울만 안 하고 있었다.
+            val ordered = list.filter { (it["lat"] as? Number)?.toDouble() ?: 0.0 > 0.0 }
+                .sortedBy { (it["ord"] as? Number)?.toInt() ?: 0 }
+            val groups = ArrayList<List<Map<String, Any?>>>()
+            var cur = ArrayList<Map<String, Any?>>()
+            var curDir: String? = null
+            for (row2 in ordered) {
+                val dv = row2["dir"] as? String ?: ""
+                if (curDir != null && dv != curDir) {
+                    groups += cur
+                    // 경계 정류장을 다음 조각의 첫 정류장으로도 넣는다
+                    cur = arrayListOf(cur.last())
+                }
+                curDir = dv
+                cur.add(row2)
+            }
+            if (cur.size >= 2) groups += cur
+            for ((di, o) in groups.withIndex()) {
                 if (o.size < 2) continue
                 trips += Trip(
                     routeId = id, srcRouteId = src, routeType = route.type,
@@ -699,8 +757,9 @@ object Gtfs {
                 append("route_id,agency_id,route_short_name,route_long_name,route_type\n")
                 for (r in routes.values) {
                     // GTFS route_type 3 = 버스.
+                    val long = if (r.tail.isEmpty()) r.type else "${r.type} · ${r.tail}"
                     append(r.id).append(",chulsegwon,").append(csv(r.no)).append(',')
-                        .append(csv(r.type)).append(",3\n")
+                        .append(csv(long)).append(",3\n")
                 }
             })
 
@@ -729,7 +788,12 @@ object Gtfs {
                 var sec = 0
                 for (k in t.stops.indices) {
                     if (k > 0) {
-                        val meters = segmentMeters(t, k, stops, cal.detour)
+                        // 서울 노선은 API 도로거리를 쓰고, 없을 때만 이 배율이 쓰인다.
+                        // 경기·인천은 항상 이 배율이라 값이 다르다.
+                        val meters = segmentMeters(
+                            t, k, stops,
+                            if (t.routeId.startsWith("S")) cal.detour else cal.detourGyeonggi,
+                        )
                         // 이 구간을 실제로 재본 적이 있으면 그걸 쓰고, 없으면 같은
                         // 간격의 구간들이 보통 얼마나 빠른지로 채운다.
                         var kmh = speed.kmh(t.srcRouteId, t.ords[k])?.also { measured++ }

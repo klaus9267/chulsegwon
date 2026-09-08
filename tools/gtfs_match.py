@@ -274,7 +274,9 @@ def main():
               % (k['kmh'], k['dwell']))
 
     print()
-    print('구간 거리 — 카카오 도로거리 ÷ 우리 직선거리 (경기는 이 비를 1.01 로 쓰고 있다):')
+    _c = current_calibration()
+    print('구간 거리 — 카카오 도로거리 ÷ 우리 직선거리 (지금 쓰는 값: 서울 %.3f · 경기 %.3f):'
+          % (_c.get('detour', 1.07), _c.get('detourGyeonggi', 1.10)))
     for label, sub_ in (('서울 실측', [r for r in ok if r['src'] == '실측']),
                         ('서울·경기 추정', [r for r in ok if r['src'] == '추정'])):
         v = [r['kakao_m'] / r['ours_m'] for r in sub_ if r['ours_m'] and r['ours_m'] > 200]
@@ -341,6 +343,13 @@ def refit(ok, stamp):
     ratios = [r['kakao_m'] / r['ours_m'] for r in ok if r['ours_m'] and r['ours_m'] > 300]
     detour = round(pct(ratios, 0.5), 3) if len(ratios) >= 30 else cur.get('detour', 1.07)
 
+    # 서울과 경기를 갈라 잰다. 서울은 API 도로거리를 쓰므로 이 배율이 쓰이는 곳이
+    # 일부뿐이고, 정작 전 구간이 이 값에 매달린 경기가 전역값 하나에 눌려 있었다.
+    gg = [r['kakao_m'] / r['ours_m'] for r in ok
+          if r['ours_m'] and r['ours_m'] > 300
+          and r['type'] in ('일반버스', '직행좌석버스', '광역급행버스', '좌석버스', '농어촌버스')]
+    detour_gg = round(pct(gg, 0.5), 3) if len(gg) >= 30 else cur.get('detourGyeonggi', 1.10)
+
     ods = sorted({r['od'] for r in ok})
     train = {o for i, o in enumerate(ods) if i % 2 == 0}
     tr = [r for r in ok if r['od'] in train]
@@ -398,15 +407,15 @@ def refit(ok, stamp):
     bias, mae, within = stats(te, best, newfac)
     note = ('카카오 구간 %d개 · %s · 평가셋 편향 %+.0f초 · MAE %.0f초 · ±3분 %.0f%%'
             % (len(ok), stamp, bias, mae, within))
-    out = {'dwellSec': best, 'detour': detour,
+    out = {'dwellSec': best, 'detour': detour, 'detourGyeonggi': detour_gg,
            'longSegmentMeters': LONG_SEG_M, 'longSegmentSpeedFactor': newfac,
            'note': note, 'fittedAt': stamp, 'sample': len(ok),
            'holdout': {'bias': round(bias), 'mae': round(mae), 'within3min': round(within, 1)}}
     json.dump(out, io.open(CALIB, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     print()
     print('보정 갱신 → %s' % CALIB)
-    print('  정류장 통과 %d초 (이전 %d초) · 구간거리 ×%.3f · %dm↑ 속도 ×%.2f (이전 ×%.2f)'
-          % (best, dw, detour, LONG_SEG_M, newfac, fac))
+    print('  정류장 통과 %d초 (이전 %d초) · 구간거리 서울 ×%.3f 경기 ×%.3f · %dm↑ 속도 ×%.2f (이전 ×%.2f)'
+          % (best, dw, detour, detour_gg, LONG_SEG_M, newfac, fac))
     print('  평가셋(맞추는 데 안 쓴 OD 절반): 편향 %+.0f초 · MAE %.0f초 · ±3분 이내 %.0f%%'
           % (bias, mae, within))
     print('CALIBRATION %d %.3f %+0.f %.0f %.1f %.2f' % (best, detour, bias, mae, within, newfac))
