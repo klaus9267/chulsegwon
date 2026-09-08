@@ -149,7 +149,7 @@ fun main(args: Array<String>) {
     if (opts["--mode"] == "bus") {
         val key = System.getenv("DATA_GO_KR_KEY")
             ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
-        val cities = opts["--cities"]?.split(",")?.map { it.trim() } ?: Bus.GYEONGGI
+        val cities = opts["--cities"]?.split(",")?.map { it.trim() } ?: Bus.CAPITAL_AREA
         Bus.run(key, cities, File(opts["--out"] ?: "data/raw/bus"))
         return
     }

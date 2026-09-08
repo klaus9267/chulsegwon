@@ -467,8 +467,12 @@ object Gtfs {
         var kept = 0
         for (r in readAll(rf, mapper)) {
             val src = r["id"] as? String ?: continue
-            val gid = "GGGB$src"          // "G" 접두 + 경기 원본 id "GGB…"
-            if (routes.containsKey(gid)) { handover[src] = gid; continue }
+            // TAGO 는 지역마다 접두가 다르다 — 경기 `GGB…`, 인천 `ICB…`.
+            // 둘 다 **서울 id 앞에 붙인 꼴**이라 같은 규칙으로 짝지어진다.
+            // 인천을 늦게 수집해서 `ICB` 를 빠뜨렸더니 인천 노선 16개가 두 벌로
+            // 세어질 뻔했다 — 배차가 두 배가 되고 도달권이 넓어진다.
+            val gid = listOf("GGGB$src", "GICB$src").firstOrNull { routes.containsKey(it) }
+            if (gid != null) { handover[src] = gid; continue }
             val hw = (r["headway"] as? Number)?.toInt()
             routes["S$src"] = Route(
                 id = "S$src", no = r["no"] as? String ?: "", type = seoulType(r["type"] as? String),

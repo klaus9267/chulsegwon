@@ -44,8 +44,18 @@ object Bus {
         "31250", "31260", "31270", "31320", "31350", "31370", "31380",
     )
 
-    /** 인천. 서울은 TAGO 에 없어서 여기 못 넣는다. */
+    /**
+     * 인천. 서울은 TAGO 에 없어서 여기 못 넣는다.
+     *
+     * ⚠️ 이 상수는 오래 **선언만 되고 안 쓰였다.** 그래서 인천 버스가 통째로 빠져
+     * 있었고, 강화군 46개·옹진군 9개 동네가 "800m 안에 정류장이 없음"으로
+     * 도달 불가가 됐다(동네 1,768개 중 63개가 인천이다). 서울 API 가 `1300인천`
+     * 같은 노선 38개를 주긴 하는데 그건 **서울을 지나는 것만**이라 인천 안쪽이 비었다.
+     */
     const val INCHEON = "23"
+
+    /** 우리가 다루는 범위. 서울은 별도 API 라 [SeoulBus] 가 맡는다. */
+    val CAPITAL_AREA = GYEONGGI + INCHEON
 
     fun run(key: String, cities: List<String>, outDir: File) {
         val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build()
