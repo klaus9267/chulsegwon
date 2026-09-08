@@ -981,7 +981,7 @@ async function main() {
 
     const t0 = performance.now();
     const set = await provider.reachability(state.origin, slot.index);
-    let within = set.stationsWithin(state.budget);
+    let within = set.within(state.budget);
 
     // 맞벌이: 두 직장 모두에서 예산 안에 드는 역만 남긴다.
     // 각 역의 값은 둘 중 **더 오래 걸리는 쪽**이다. 두 사람 다 그 시간 안에
@@ -991,9 +991,9 @@ async function main() {
       const set2 = await provider.reachability(state.origin2, slot.index);
       const both: Array<[number, number]> = [];
       for (const [i] of within) {
-        const b = set2.minutesToStation(i);
+        const b = set2.minutesTo(i);
         if (b === null) continue;
-        const a = set.minutesToStation(i);
+        const a = set.minutesTo(i);
         if (a === null) continue;
         const worst = Math.max(a, b);
         if (worst <= state.budget) both.push([i, worst]);
@@ -1001,7 +1001,9 @@ async function main() {
       within = both;
     }
 
-    const field = buildField(meta.stations, within, {
+    // 도착 축이 동네다. 예전엔 역 621개를 부풀려 등시선을 그렸는데, 지금은
+    // 동네 1,768개가 각자 정확한 값을 갖고 있어 그걸 그대로 칠한다.
+    const field = buildField(meta.dongs, within, {
       budgetMinutes: state.budget,
       walkCapMinutes: state.walkCap,
       cellMeters: CELL_METERS,
@@ -1016,7 +1018,7 @@ async function main() {
       return;
     }
     map.setBands(bands, RAMP, state.budget);
-    map.setStations(buildStationGeoJSON(meta.stations, within));
+    map.setStations(buildStationGeoJSON(meta.stations, state.origin));
 
     // 도달권 안 + 예산 이내. 폴리곤 검사 없이 스칼라 필드를 찍어보면 O(1) 이다.
     const buildings = field
@@ -1110,10 +1112,14 @@ function coreBounds(
 ): Bounds {
   const lons: number[] = [];
   const lats: number[] = [];
+  // ⚠️ `within` 은 **동네** 색인이다. 도착 축이 역에서 동네로 바뀌었는데 여기가
+  // 예전대로 meta.stations 를 보고 있었고, 동네 색인이 621을 넘으면 undefined 가
+  // 나와 지도가 통째로 죽었다.
   for (const [i] of within) {
-    const st = meta.stations[i];
-    lons.push(st.lon);
-    lats.push(st.lat);
+    const d = meta.dongs[i];
+    if (!d) continue;
+    lons.push(d.lon);
+    lats.push(d.lat);
   }
   if (lons.length === 0) return SEOUL_BOUNDS;
   lons.sort((a, b) => a - b);

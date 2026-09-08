@@ -199,6 +199,8 @@ object DongMatrix {
     ) {
         val sb = StringBuilder()
         sb.append("{\n  \"version\": 2,\n  \"generatedBy\": \"raptor-gtfs\",\n")
+        sb.append("  \"warning\": \"배차간격 기반 합성 시간표다. 실제 편성 시각표는 공공에 없다.\",\n")
+        sb.append("  \"transferOverheadSeconds\": 0,\n")
         sb.append("  \"note\": \"도착 축이 역이 아니라 법정동이다. 지하철+버스+도보 통합.\",\n")
         sb.append("  \"capMinutes\": ").append(cap).append(",\n  \"slots\": [\n")
         slots.forEachIndexed { i, s ->
@@ -208,10 +210,16 @@ object DongMatrix {
                 .append(", \"label\": \"").append(s.label).append("\"}")
             sb.append(if (i == slots.size - 1) "\n" else ",\n")
         }
-        sb.append("  ],\n  \"origins\": [\n")
+        // 키 이름을 `stations` 로 둔다. **출발지는 여전히 역 621개**라, 이러면
+        // 출발지 콤보박스·공유 링크·지도 마커가 손댈 필요 없이 그대로 돈다.
+        // 바뀌는 건 도착 축뿐이고 그건 아래 `dongs` 다.
+        sb.append("  ],\n  \"stations\": [\n")
         network.stations.forEachIndexed { i, s ->
+            val lines = s.platforms.map { network.platforms[it].line }.distinct()
             sb.append("    {\"index\": ").append(i).append(", \"name\": \"").append(s.name)
-                .append("\", \"lat\": ").append(s.lat).append(", \"lon\": ").append(s.lon).append("}")
+                .append("\", \"lat\": ").append(s.lat).append(", \"lon\": ").append(s.lon)
+                .append(", \"lines\": [")
+                .append(lines.joinToString(",") { "\"" + it + "\"" }).append("]}")
             sb.append(if (i == network.stations.size - 1) "\n" else ",\n")
         }
         sb.append("  ],\n  \"dongs\": [\n")

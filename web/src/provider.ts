@@ -15,10 +15,11 @@ const HEADER_BYTES = 10;
 const FETCH_INIT: RequestInit = { headers: { "ngrok-skip-browser-warning": "1" } };
 
 /**
- * v1 구현: 역 -> 역 소요시간 행렬.
+ * v2 구현: **출발역 -> 동네** 소요시간 행렬 (지하철+버스+도보).
  *
- * Level 2 에서 R5 격자 벡터로 바꿀 때 이 파일만 갈아끼우면 된다.
- * 지도·UI 코드는 [ReachabilityProvider] 만 알고 있다.
+ * v1 은 역 -> 역이었다. 버스가 들어오면서 도착 축을 법정동 1,768개로 바꿨다.
+ * 갈아끼운 건 이 파일과 타입뿐이고, 지도·UI 는 [ReachabilityProvider] 만 본다 —
+ * 설계할 때 노린 게 그거였다.
  */
 export class StationMatrixProvider implements ReachabilityProvider {
   private cache = new Map<number, Uint8Array>();
@@ -40,16 +41,16 @@ export class StationMatrixProvider implements ReachabilityProvider {
 
   async reachability(origin: number, slotIndex: number): Promise<ReachabilitySet> {
     const matrix = await this.fetchOrigin(origin);
-    const stationCount = this.meta.stations.length;
-    const offset = slotIndex * stationCount;
-    const row = matrix.subarray(offset, offset + stationCount);
+    const n = this.meta.dongs.length;
+    const offset = slotIndex * n;
+    const row = matrix.subarray(offset, offset + n);
 
     return {
-      minutesToStation(i) {
+      minutesTo(i) {
         const v = row[i];
         return v === UNREACHABLE_MINUTES ? null : v;
       },
-      stationsWithin(budget) {
+      within(budget) {
         const out: Array<[number, number]> = [];
         for (let i = 0; i < row.length; i++) {
           const v = row[i];

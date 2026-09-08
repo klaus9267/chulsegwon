@@ -1,4 +1,8 @@
-import type { StationMeta } from "./types";
+/** 필드를 칠하는 점. 예전엔 역이었고 지금은 동네다 — 좌표만 있으면 된다. */
+export interface FieldPoint {
+  lat: number;
+  lon: number;
+}
 
 /** 보행속도 4.5km/h. 직선거리 기준이라 실제 도보망보다 낙관적이다. */
 const WALK_MPS = 1.25;
@@ -58,7 +62,7 @@ export interface Field {
  * 15분이면 역 하나가 덮는 칸이 수십 개뿐이라, 역 300개라도 만 번 남짓이면 끝난다.
  */
 export function buildField(
-  stations: StationMeta[],
+  stations: FieldPoint[],
   within: Array<[number, number]>,
   opts: FieldOptions,
 ): Field | null {
@@ -161,23 +165,35 @@ function smooth(values: Float32Array, rows: number, cols: number, passes: number
 }
 
 /**
- * 도달 역 자체를 점으로. 등시선만으로는 어디가 역인지 안 보인다.
+ * 역을 점으로. 등시선만으로는 어디가 역인지 안 보인다.
  *
  * `index` 를 넣는 이유는 클릭해서 직장역으로 바꿀 수 있어야 하기 때문이고,
  * `interchange` 는 환승역을 가운데 흰 점으로 구분하기 위해서다 — 노선도의
  * 전통적인 표기법이다.
+ *
+ * **도달시간을 더는 싣지 않는다.** 도착 축이 동네로 바뀌어서 역별 시간이 행렬에
+ * 없다. 지도도 그 값을 쓴 적이 없다(이름·색인·환승 여부만 쓴다). 대신 역이 621개나
+ * 되고 지도가 300개까지만 그리므로, **출발지에서 가까운 순으로** 정렬해서 넘긴다 —
+ * 색인 순으로 자르면 소요산 쪽만 나오고 정작 보고 있는 동네에는 하나도 안 찍힌다.
  */
 export function buildStationGeoJSON(
-  stations: StationMeta[],
-  within: Array<[number, number]>,
+  stations: Array<FieldPoint & { name: string; lines: string[] }>,
+  originIndex: number,
 ): GeoJSON.FeatureCollection {
+  const o = stations[originIndex];
+  const order = stations
+    .map((s, i) => {
+      const dx = (s.lon - o.lon) * Math.cos((o.lat * Math.PI) / 180);
+      const dy = s.lat - o.lat;
+      return [i, dx * dx + dy * dy] as [number, number];
+    })
+    .sort((a, b) => a[1] - b[1]);
   return {
     type: "FeatureCollection",
-    features: within.map(([i, minutes]) => ({
+    features: order.map(([i]) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [stations[i].lon, stations[i].lat] },
       properties: {
-        minutes,
         name: stations[i].name,
         index: i,
         interchange: stations[i].lines.length > 1 ? 1 : 0,
