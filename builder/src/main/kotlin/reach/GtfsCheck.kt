@@ -60,8 +60,10 @@ object GtfsCheck {
 
             // ── 참조 무결성 ────────────────────────────────────────
             val stopIds = HashMap<String, Pair<Double, Double>>(stops.rows.size * 2)
+            val parentStations = HashSet<String>()
             for (r in stops.rows) {
                 val id = stops.col(r, "stop_id")
+                if (stops.col(r, "location_type") == "1") parentStations += id
                 if (id.isEmpty()) { errors += "stops.txt: 빈 stop_id"; continue }
                 if (id in stopIds) errors += "stops.txt: stop_id 중복 $id"
                 val la = stops.col(r, "stop_lat").toDoubleOrNull()
@@ -161,7 +163,9 @@ object GtfsCheck {
                 val n = tripStopCount[t] ?: 0
                 if (n < 2) errors += "trips.txt: $t 에 정류장이 ${n}개뿐이다"
             }
-            val unused = stopIds.keys - usedStops
+            // `location_type=1` 은 승강장을 묶는 **역**이라 stop_times 에 안 나오는 게 맞다.
+            // 이걸 안 빼면 지하철 GTFS 에서 역 621개가 통째로 "안 쓰이는 정류장"이 된다.
+            val unused = stopIds.keys - usedStops - parentStations
             if (unused.isNotEmpty()) warns += "어느 운행에도 안 쓰이는 정류장 ${"%,d".format(unused.size)}개"
 
             // ── frequencies ────────────────────────────────────────

@@ -172,6 +172,11 @@ fun main(args: Array<String>) {
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
 
+    if (opts["--mode"] == "gtfssubway") {
+        SubwayGtfs.export(network, File(opts["--out"] ?: "data/out/gtfs-subway.zip"))
+        return
+    }
+
     if (opts["--mode"] == "render") {
         val tt = TimetableBuilder.synthesize(network)
         Render.run(
