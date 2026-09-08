@@ -33,6 +33,83 @@ object DongMatrix {
 
     private class Dong(val name: String, val gu: String, val lat: Double, val lon: Double)
 
+    /**
+     * 한 지점에서 걸어 닿는 정류장들.
+     *
+     * **도보망이 있으면 그걸 쓰고, 없으면 직선거리로 떨어진다.** 직선거리는 한강도
+     * 고속도로도 없는 것처럼 계산한다 — 직선 400m 인데 다리를 돌아 2km 인 자리가
+     * 실제로 많고, 동네 중심에서 정류장까지가 딱 그 규모다.
+     *
+     * 정류장 6만 개를 미리 도보망 노드에 붙여두고(스냅), 질의할 때는 반경 안에서
+     * 그 노드들을 만나는지만 본다. 지점→노드, 정류장→노드 스냅 거리도 도보시간에
+     * 더한다 — 안 그러면 큰길에서 100m 들어간 정류장이 공짜가 된다.
+     */
+    private class WalkAccess(private val g: WalkGraph?, private val d: TransitData) {
+        private val stopNode = IntArray(d.stopCount) { -1 }
+        private val stopSnap = DoubleArray(d.stopCount)
+        private val nodeStops = HashMap<Int, MutableList<Int>>(d.stopCount)
+        var snapped = 0; private set
+
+        init {
+            if (g != null) {
+                for (i in 0 until d.stopCount) {
+                    if (d.stopLat[i] == 0.0) continue
+                    val n = g.nearest(d.stopLat[i], d.stopLon[i], SNAP_M)
+                    if (n < 0) continue
+                    stopNode[i] = n
+                    stopSnap[i] = Geo.haversineMeters(
+                        d.stopLat[i], d.stopLon[i], g.latOf(n), g.lonOf(n))
+                    nodeStops.getOrPut(n) { ArrayList(2) } += i
+                    snapped++
+                }
+            }
+        }
+
+        /** (정류장, 도보초) 쌍의 평탄 배열. */
+        fun from(lat: Double, lon: Double, maxM: Double): IntArray {
+            if (g != null) {
+                val start = g.nearest(lat, lon, SNAP_M)
+                if (start >= 0) {
+                    val base = Geo.haversineMeters(lat, lon, g.latOf(start), g.lonOf(start))
+                    val best = HashMap<Int, Double>(64)
+                    g.reachable(start, maxM - base) { node, meters ->
+                        val ss = nodeStops[node] ?: return@reachable
+                        for (i in ss) {
+                            val total = base + meters + stopSnap[i]
+                            if (total <= maxM && total < (best[i] ?: Double.MAX_VALUE)) best[i] = total
+                        }
+                    }
+                    if (best.isNotEmpty()) {
+                        val out = IntArray(best.size * 2)
+                        var k = 0
+                        for ((i, m) in best) {
+                            out[k++] = i
+                            out[k++] = (m / WALK_MPS).toInt().coerceAtLeast(10)
+                        }
+                        return out
+                    }
+                }
+            }
+            return straight(lat, lon, maxM)
+        }
+
+        /** 도보망이 없거나 그 지점이 도보망에서 떨어져 있을 때. */
+        private fun straight(lat: Double, lon: Double, maxM: Double): IntArray {
+            val out = ArrayList<Int>(32)
+            for (i in 0 until d.stopCount) {
+                if (d.stopLat[i] == 0.0) continue
+                val m = Geo.haversineMeters(lat, lon, d.stopLat[i], d.stopLon[i])
+                if (m > maxM) continue
+                out += i
+                out += ((m * WALK_DETOUR) / WALK_MPS).toInt().coerceAtLeast(10)
+            }
+            return out.toIntArray()
+        }
+    }
+
+    /** 지점·정류장을 도보망에 붙일 때 허용하는 최대 거리(m). */
+    private const val SNAP_M = 300.0
+
     fun build(
         network: Network,
         subwayGtfs: File,
@@ -40,8 +117,15 @@ object DongMatrix {
         dongsJson: File,
         outDir: File,
         capMinutes: Int,
+        walkGraph: File? = null,
     ) {
         val t0 = System.currentTimeMillis()
+        val walk = walkGraph?.takeIf { it.exists() }?.let {
+            val g = WalkGraph.load(it)
+            println("      도보망 노드 ${"%,d".format(g.nodeCount)} (${System.currentTimeMillis() - t0}ms)")
+            g
+        }
+        if (walk == null) println("      ⚠️ 도보망이 없다 — 접근·이탈을 직선거리로 잡는다")
         val data = TransitData.load(subwayGtfs, busGtfs)
         val links = data.linkNearbyStops()
         println("      ${data.describe()} · 도보 환승 ${"%,d".format(links)}개 추가")
@@ -49,17 +133,21 @@ object DongMatrix {
         val dongs = readDongs(dongsJson)
         println("      동네 ${"%,d".format(dongs.size)}개")
 
+        val access = WalkAccess(walk, data)
+        if (walk != null) {
+            println("      정류장 ${"%,d".format(access.snapped)}/${"%,d".format(data.stopCount)}" +
+                " 개를 도보망에 붙였다 (${SNAP_M.toInt()}m 안)")
+        }
+
         // 동네마다 걸어서 닿는 정류장. 이게 이탈(egress) 도보다.
-        val nearStops = nearbyStops(dongs, data)
+        val nearStops = Array(dongs.size) { access.from(dongs[it].lat, dongs[it].lon, ACCESS_M) }
         val orphan = nearStops.count { it.isEmpty() }
         println("      동네당 ${ACCESS_M.toInt()}m 안 정류장 중앙 " +
             "${nearStops.map { it.size / 2 }.sorted()[nearStops.size / 2]}개" +
             if (orphan > 0) " · 정류장이 없는 동네 ${orphan}개" else "")
 
         // 출발지: 역 621개. 역 주변 정류장도 같이 태운다(버스로 갈아탈 수 있으니).
-        val originSeeds = network.stations.map { st ->
-            stopsWithin(st.lat, st.lon, data, ACCESS_M)
-        }
+        val originSeeds = network.stations.map { st -> access.from(st.lat, st.lon, ACCESS_M) }
         println("      출발지 ${network.stations.size}개 · 역당 승차 후보 중앙 " +
             "${originSeeds.map { it.size / 2 }.sorted()[originSeeds.size / 2]}개")
 
@@ -135,46 +223,6 @@ object DongMatrix {
         t = 17 * 3600
         while (t <= 23 * 3600) { out += Slot(i++, Direction.DEPART_AT, t); t += 1800 }
         return out
-    }
-
-    /** (정류장, 도보초) 쌍의 평탄 배열. */
-    private fun stopsWithin(lat: Double, lon: Double, d: TransitData, maxM: Double): IntArray {
-        val out = ArrayList<Int>(32)
-        for (i in 0 until d.stopCount) {
-            if (d.stopLat[i] == 0.0) continue
-            val m = Geo.haversineMeters(lat, lon, d.stopLat[i], d.stopLon[i])
-            if (m > maxM) continue
-            out += i
-            out += ((m * WALK_DETOUR) / WALK_MPS).toInt()
-        }
-        return out.toIntArray()
-    }
-
-    /** 동네마다 한 번씩 전 정류장을 훑으면 1,768 × 51,583 이라 격자로 좁힌다. */
-    private fun nearbyStops(dongs: List<Dong>, d: TransitData): Array<IntArray> {
-        val cell = ACCESS_M / 111_000.0
-        val grid = HashMap<Long, MutableList<Int>>(d.stopCount)
-        for (i in 0 until d.stopCount) {
-            if (d.stopLat[i] == 0.0) continue
-            val k = (Math.floor(d.stopLat[i] / cell).toLong() shl 32) xor
-                Math.floor(d.stopLon[i] / cell).toLong()
-            grid.getOrPut(k) { ArrayList(8) } += i
-        }
-        return Array(dongs.size) { di ->
-            val g = dongs[di]
-            val gy = Math.floor(g.lat / cell).toLong()
-            val gx = Math.floor(g.lon / cell).toLong()
-            val out = ArrayList<Int>(32)
-            for (dy in -1..1) for (dx in -1..1) {
-                for (i in grid[((gy + dy) shl 32) xor (gx + dx)] ?: continue) {
-                    val m = Geo.haversineMeters(g.lat, g.lon, d.stopLat[i], d.stopLon[i])
-                    if (m > ACCESS_M) continue
-                    out += i
-                    out += ((m * WALK_DETOUR) / WALK_MPS).toInt()
-                }
-            }
-            out.toIntArray()
-        }
     }
 
     private fun readDongs(f: File): List<Dong> {

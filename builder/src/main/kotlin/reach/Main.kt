@@ -238,6 +238,7 @@ fun main(args: Array<String>) {
             dongsJson = File(opts["--dongs"] ?: "web/public/data/dongs.json"),
             outDir = File(opts["--out"] ?: "data/out/reach2"),
             capMinutes = (opts["--cap"] ?: "120").toInt(),
+            walkGraph = File(opts["--walkgraph"] ?: "data/raw/osm/walk-graph.bin"),
         )
         return
     }
