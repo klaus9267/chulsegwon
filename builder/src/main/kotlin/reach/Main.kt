@@ -57,6 +57,57 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "raptor") {
+        val t0 = System.currentTimeMillis()
+        val data = TransitData.load(
+            File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
+            File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+        )
+        val added = data.linkNearbyStops(
+            maxMeters = (opts["--walklink"] ?: "400").toDouble(),
+        )
+        println("      ${data.describe()}  (${System.currentTimeMillis() - t0}ms)")
+        println("      가까운 정류장 사이 도보 환승 ${"%,d".format(added)}개 생성")
+
+        val fromName = opts["--from"] ?: "강남"
+        // 출발점: 이름이 맞는 정류장 전부. 접근 도보는 아직 안 붙였다.
+        val origins = (0 until data.stopCount)
+            .filter { data.stopNames[it].substringBefore(' ') == fromName }
+            .associateWith { parseHm(opts["--at"] ?: "08:00") }
+        require(origins.isNotEmpty()) { "출발 정류장을 못 찾았다: $fromName" }
+        println("      출발 '$fromName' 정류장 ${origins.size}개")
+
+        val depart = parseHm(opts["--at"] ?: "08:00")
+        val cap = (opts["--budget"] ?: "90").toInt()
+        val r = Raptor(data)
+        val t1 = System.currentTimeMillis()
+        val best = r.run(origins, depart + cap * 60)
+        println("      탐색 ${System.currentTimeMillis() - t1}ms")
+
+        val reach = best.count { it < Raptor.INF }
+        println("      ${cap}분 안에 닿는 정류장 ${"%,d".format(reach)} / ${"%,d".format(data.stopCount)}")
+        // 이름이 아니라 **좌표**로 확인한다. 이름 앞자리로 고르면 엉뚱한 동네의
+        // 같은 이름 정류장이 잡혀 "안산 42분" 같은 값이 나온다.
+        val probes = listOf(
+            Triple("홍대입구", 37.5572, 126.9245), Triple("잠실", 37.5133, 127.1001),
+            Triple("수원역", 37.2659, 127.0001), Triple("의정부역", 37.7383, 127.0470),
+            Triple("판교역", 37.3948, 127.1112), Triple("일산 대화", 37.6763, 126.7476),
+            Triple("안산 중앙", 37.3149, 126.8386), Triple("인천역", 37.4762, 126.6169),
+            Triple("광교중앙", 37.2995, 127.0453), Triple("동탄역", 37.2007, 127.0982),
+        )
+        for ((name, la, lo) in probes) {
+            var bv = Raptor.INF
+            for (i in 0 until data.stopCount) {
+                if (data.stopLat[i] == 0.0) continue
+                if (Geo.haversineMeters(la, lo, data.stopLat[i], data.stopLon[i]) > 400) continue
+                if (best[i] < bv) bv = best[i]
+            }
+            println("        %-10s %s".format(name,
+                if (bv >= Raptor.INF) "도달 못함" else "${(bv - depart) / 60}분"))
+        }
+        return
+    }
+
     if (opts["--mode"] == "gtfscheck") {
         GtfsCheck.run(File(opts["--in"] ?: "data/out/gtfs-seoul-gyeonggi.zip"))
         return
