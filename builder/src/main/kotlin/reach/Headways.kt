@@ -35,11 +35,27 @@ object Headways {
         LINE_MULTIPLIER.entries.firstOrNull { line.contains(it.key) }?.value ?: 1.0
 
     /**
-     * 표정속도(정차 포함) 기반 구간 소요시간.
+     * 역 하나를 지나는 데 붙는 시간(초).
+     *
+     * **처음엔 0 이었고, 그게 틀렸다.** 카카오맵 지하철 구간 206개와 대보니
+     * 우리 승차시간이 일관되게 8.8% 짧았다(편향 −95초). 아래 표정속도는 구간을
+     * 달리는 속도지 감속·정차·가속을 담지 않는다.
+     *
+     * OD 40개를 반으로 갈라 한쪽으로 맞추고 다른 쪽으로 평가했다:
+     * 평가셋 편향 −113초 → −18초 · MAE 133초 → 82초 · ±3분 이내 78% → 90%.
+     *
+     * ⚠️ 이 값을 바꾸면 **문앞-문앞 대조(−0.9분)도 다시 재야 한다.** 그 검증은
+     * 승차시간이 짧은 것과 대기시간이 긴 것이 상쇄돼 맞아 보였던 것이라
+     * (ADR-29 의 반박 검증), 한쪽만 고치면 총합이 오히려 어긋난다.
+     */
+    private const val STATION_DWELL_SEC = 10
+
+    /**
+     * 표정속도 기반 구간 소요시간 + 역 통과 비용.
      * 도심 지하철은 역간이 짧고 느리며, 광역철도는 역간이 길고 빠르다.
      */
     fun segmentSeconds(meters: Double): Int {
         val kmh = if (meters < 1_500) 32.0 else 50.0
-        return (meters / (kmh * 1000.0 / 3600.0)).toInt().coerceAtLeast(30)
+        return (meters / (kmh * 1000.0 / 3600.0)).toInt().coerceAtLeast(30) + STATION_DWELL_SEC
     }
 }

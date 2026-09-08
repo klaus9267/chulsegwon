@@ -96,7 +96,7 @@ object GmlLoader {
             id = cur["id"]!!.first().toInt(),
             code = cur["label"]!!.first().trim('"'),
             line = cur["line_no"]!!.first().trim('"'),
-            name = decodeEntities(cur["station_name"]!!.first().trim('"')),
+            name = fixName(decodeEntities(cur["station_name"]!!.first().trim('"'))),
             lon = pos[0].toDouble(),
             lat = pos[1].toDouble(),
         )
@@ -126,6 +126,21 @@ object GmlLoader {
     }
 
     /** GML 안의 한글이 &#49548; 형태로 인코딩되어 있다. */
+
+    /**
+     * 원본 GML 의 역명 오타를 바로잡는다.
+     *
+     * 카카오맵 지하철 대조에서 9개 구간이 "역이 없다"로 떨어져 찾아보니
+     * `동대문역사문화공원` 이 **`문화공원동대문역사`** 로 글자가 뒤섞여 있었다.
+     * 글자 구성이 같은 짝을 전수로 훑어 이 하나만 나왔다.
+     *
+     * GML 은 남의 파일이라 고치지 않고 읽을 때 바로잡는다.
+     */
+    private val RENAME = mapOf(
+        "문화공원동대문역사" to "동대문역사문화공원",
+    )
+
+    private fun fixName(v: String) = RENAME[v] ?: v
     private fun decodeEntities(s: String): String {
         if ('&' !in s) return s
         val out = StringBuilder()
