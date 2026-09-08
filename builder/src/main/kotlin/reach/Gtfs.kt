@@ -947,8 +947,20 @@ object Gtfs {
         if (v.contains(',') || v.contains('"') || v.contains('\n'))
             "\"" + v.replace("\"", "\"\"").replace("\n", " ") + "\"" else v
 
+    /**
+     * zip 항목 시각을 고정한다.
+     *
+     * 안 그러면 **내용이 같아도 파일 바이트가 매번 달라진다** — 항목마다 현재 시각이
+     * 박히기 때문이다. 그러면 "GTFS 가 바뀌었나"를 해시로 판단할 수 없고, 하루 다섯 번
+     * 도는 스케줄이 매번 4분짜리 행렬 재생성을 헛돌린다. 릴리스 자산도 내용이 같은데
+     * 매번 새 파일로 올라간다.
+     *
+     * 재현 가능한 산출물의 표준 관행이기도 하다.
+     */
+    private const val FIXED_TIME = 1_577_836_800_000L   // 2020-01-01T00:00:00Z
+
     private fun entry(zip: ZipOutputStream, name: String, body: String) {
-        zip.putNextEntry(ZipEntry(name))
+        zip.putNextEntry(ZipEntry(name).apply { time = FIXED_TIME })
         zip.write(body.toByteArray(Charsets.UTF_8))
         zip.closeEntry()
     }

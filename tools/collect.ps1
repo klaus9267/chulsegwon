@@ -111,6 +111,29 @@ if ($after -and $after -ne $before) {
 }
 Say '◀ 카카오 대조 · 보정'
 
+# 6) 도달권 행렬. GTFS 가 바뀌었을 때만 다시 만든다.
+#
+#    한 번에 6분이라 매 회차 돌릴 이유가 없다. 바뀌는 건 속도 스냅샷이 하나 더
+#    쌓였을 때뿐이고, 그건 하루 다섯 번 중 몇 번이다. zip 이 행렬보다 새것이면 돈다.
+#    ⚠️ 수정시각으로 비교하면 안 된다. `--mode gtfs` 는 내용이 같아도 매번 zip 을
+#    새로 쓰므로 zip 이 항상 더 새것이 되고, 행렬이 매 회차(4분씩) 헛돈다.
+#    **내용 해시**로 본다.
+$zipPath = 'data/out/gtfs-seoul-gyeonggi.zip'
+$subPath = 'data/out/gtfs-subway.zip'
+$stampPath = 'data/out/matrix-built.txt'
+$sig = ''
+foreach ($f in @($zipPath, $subPath)) {
+    if (Test-Path $f) { $sig += (Get-FileHash $f -Algorithm SHA256).Hash }
+}
+$prev = if (Test-Path $stampPath) { (Get-Content $stampPath -Raw).Trim() } else { '' }
+$needMatrix = ($sig -ne '') -and ($sig -ne $prev)
+if ($needMatrix) {
+    Step '도달권 행렬' @('--mode','dongmatrix','--gml','data/raw/metro_graph.gml','--out','web/public/data')
+    Set-Content -Path $stampPath -Value $sig -Encoding ASCII
+} else {
+    Say '· 도달권 행렬 — GTFS 내용이 그대로라 건너뛴다'
+}
+
 Say "===== 수집 끝 ====="
 
 # ── 지표 한 줄 ───────────────────────────────────────────────
