@@ -33,6 +33,10 @@ data/raw/seoul/
 # GBIS 엑셀 (2026-09-09). 17MB 이고 월 1회 갱신되며 신청 없이 언제든 받을 수 있다.
 # 받는 곳은 data/raw/SOURCE.md, 여기서 JSONL 을 만드는 건 tools/gbis_village.py.
 data/raw/gbis/
+# ⚠️ 저장소 루트에 떨어진 사본까지 막는다. GBIS 파일이 루트에 하나 떨어져 있었는데
+#    (data/raw/gbis/ 것과 바이트까지 같았다) 루트는 위 규칙에 안 걸려서
+#    `git add -A` 한 번이면 300KB 바이너리가 이력에 박힌다.
+GGD_*.xlsx
 # 실측 열차 시각표 (2026-09-09). 서울교통공사 33MB + 코레일(KRIC) 10MB.
 # 둘 다 로그인 없이 언제든 받는다. 받는 곳과 열 설명은 data/raw/SOURCE.md,
 # 읽는 건 RailTimetable.kt (KRIC 은 tools/kric_rail.py 가 CSV 로 푼다).
