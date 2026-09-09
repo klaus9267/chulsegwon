@@ -46,13 +46,23 @@ import java.nio.charset.Charset
 object RailTimetable {
 
     /**
-     * 시각표 역명 → `metro_graph.gml` 역명.
+     * 시각표 역명 → **[Network.stations] 의 역명**.
      *
-     * GML 쪽에 **어순이 뒤집힌 이름**이 있다(`문화공원동대문역사`). 원본의 특징이라
-     * 여기서 흡수한다. 나머지는 개명(총신대입구→이수, 당고개→불암산)이다.
+     * ⚠️ **GML 원본이 아니라 빌더가 만든 이름에 맞춰야 한다.** GML 에는 어순이
+     * 뒤집힌 이름이 몇 개 있는데([GmlLoader.fixName] 이 일부를 이미 고친다),
+     * 처음에 GML 원본을 보고 표를 만들었다가 `동대문역사문화공원` 을
+     * `문화공원동대문역사` 로 되돌려 놓았다. 그 이름은 network 에 없으니 매핑이
+     * 실패했고, **2·4·5호선 열차가 동대문역사문화공원에 아예 안 섰다.**
+     * 환승 거점 하나가 세 노선에서 통째로 빠진 것이다.
+     *
+     * `--mode gtfscheck` 의 "어느 운행에도 안 쓰이는 정류장" 경고가 이걸 잡았다.
+     * 아래 [load] 가 못 붙인 역명을 전부 찍는 것도 같은 이유다 — 조용히 빠지면
+     * 아무도 모른다.
+     *
+     * 남은 것은 개명(총신대입구→이수, 당고개→불암산, 지제→평택지제)과
+     * [GmlLoader.fixName] 이 안 고치는 어순 뒤집힘(`삼거리신대방`) 이다.
      */
     private val ALIAS = mapOf(
-        "동대문역사문화공원" to "문화공원동대문역사",
         "신대방삼거리" to "삼거리신대방",
         "이수" to "총신대입구",
         "자양" to "뚝섬유원지",
@@ -103,7 +113,14 @@ object RailTimetable {
             if (v.size <= cDep) continue
             if (v[cDay] != "DAY") continue        // 평일만
             val line = v[cLine]
-            val sec = hms(v[cDep]) ?: hms(v[cArr]) ?: continue
+            val raw0 = hms(v[cDep]) ?: hms(v[cArr]) ?: continue
+            // ⚠️ **정렬하기 전에** 자정을 넘긴 시각을 다음날로 올린다.
+            // 첫차가 05:20 이고 막차가 01:30 이라 04시 이전은 전부 다음날이다.
+            // 이걸 안 하면 23:50 에 떠나 00:30 에 닿는 열차를 시각순으로 정렬했을 때
+            // 새벽 정차가 맨 앞으로 와서 **운행 순서가 뒤집힌다.** 실제로 1호선
+            // 급행 하나가 금천구청→서울역 18.5시간짜리 구간을 갖고 있었다.
+            // 4,811편 중 6편이 자정을 넘는다.
+            val sec = if (raw0 < 4 * 3600) raw0 + 86400 else raw0
             val name = v[cName]
             val plat = byName["$line\u0000${ALIAS[name] ?: name}"]
             if (plat == null) { unmapped++; unmappedNames += "$line $name"; continue }
@@ -111,6 +128,33 @@ object RailTimetable {
             trains.getOrPut(key) { ArrayList(60) } += Stop(sec, plat)
             if (v[cExp] == "1") trainExpress[key] = true
         }
+
+        // ⚠️ **열차코드가 하루에 두 번 쓰인다.** 4호선 `4422K` UP 은 아침
+        // 오이도→불암산 운행이자 밤 고잔→한대앞 운행이다. (호선, 열차코드, 방향)
+        // 으로만 묶으면 둘이 한 편이 되어 48정차 17시간짜리 괴물이 나오고,
+        // 그 뒤 단조 보정이 빈 자리를 30초로 메워 **14km 를 30초에 가는 유령 구간**을
+        // 만든다. 라우터는 그걸 탄다. 4,811편 중 6편이 이 꼴이었다.
+        //
+        // 인접 정차 사이가 1시간 넘게 벌어지면 다른 운행으로 자른다. 수도권 전철에서
+        // 인접 정차 간격이 1시간인 운행은 없다 — 급행이 여러 역을 건너뛰어도 15분쯤이다.
+        var splitRuns = 0
+        run {
+            val extra = ArrayList<Pair<String, MutableList<Stop>>>()
+            for ((key, stops) in trains) {
+                stops.sortBy { it.sec }
+                var cut = -1
+                for (i in 1 until stops.size) {
+                    if (stops[i].sec - stops[i - 1].sec > 3600) { cut = i; break }
+                }
+                if (cut < 0) continue
+                val tail = ArrayList(stops.subList(cut, stops.size))
+                while (stops.size > cut) stops.removeAt(stops.size - 1)
+                extra += "$key#${extra.size}" to tail
+                splitRuns++
+            }
+            for ((k, v) in extra) trains[k] = v
+        }
+        if (splitRuns > 0) println("      열차코드가 하루에 두 번 쓰인 운행 ${splitRuns}편을 잘랐다")
 
         // 패턴으로 묶는다.
         class Acc(val stops: IntArray, val express: Boolean, val line: String) {
@@ -121,15 +165,11 @@ object RailTimetable {
         for ((key, raw) in trains) {
             val line = key.substringBefore('\u0000')
             raw.sortBy { it.sec }
-            // 자정을 넘긴 편은 시각이 되감긴다. 크게 뒤로 뛰면 하루를 더한다.
+            // 같은 승강장이 연속으로 나오면(도착/출발 두 줄) 하나로 접는다.
             val seq = ArrayList<Stop>(raw.size)
-            var prev = Int.MIN_VALUE
             for (s in raw) {
-                var t = s.sec
-                if (prev != Int.MIN_VALUE && t < prev - 3600) t += 86400
-                prev = t
                 if (seq.isNotEmpty() && seq.last().plat == s.plat) continue
-                seq += Stop(t, s.plat)
+                seq += s
             }
             if (seq.size < 2) continue
             val express = trainExpress[key] == true
@@ -143,10 +183,29 @@ object RailTimetable {
         }
 
         val out = ArrayList<Pattern>(pats.size)
+        var dropped = 0
         for (a in pats.values) {
             val offs = IntArray(a.stops.size) { median(a.legs[it]) }
-            // 단조 증가를 강제한다. 중앙값을 자리마다 따로 잡으면 어긋날 수 있다.
-            for (i in 1 until offs.size) if (offs[i] <= offs[i - 1]) offs[i] = offs[i - 1] + 30
+
+            // ── 문지기 ────────────────────────────────────────────────
+            // 말이 안 되는 운행은 **버린다**. 예전엔 단조 증가를 강제해서 빈 자리를
+            // 30초로 메웠는데, 그게 신길온천→수리산 14km 를 30초에 가는 유령 구간을
+            // 만들었다. 라우터는 그걸 탄다 — 보정이 버그를 고치는 게 아니라
+            // **더 나쁜 것으로 바꿔놓고 있었다.**
+            //
+            // 원인은 열차코드 재사용이고 위에서 자르지만, 자르고도 순서가 어긋나는
+            // 잔여가 있다. 그런 건 편수가 한두 편짜리라 버려도 서비스가 안 준다.
+            var sane = true
+            for (i in 1 until offs.size) {
+                if (offs[i] <= offs[i - 1]) { sane = false; break }
+                val p0 = network.platforms[a.stops[i - 1]]
+                val p1 = network.platforms[a.stops[i]]
+                val m = Geo.haversineMeters(p0.lat, p0.lon, p1.lat, p1.lon)
+                // 150km/h 는 수도권 전철 최고속도(110km/h)에 여유를 얹은 값이고,
+                // 직선거리로 재므로 실제보다 낮게 나온다. 넘으면 순서가 틀린 것이다.
+                if (m / (offs[i] - offs[i - 1]) * 3.6 > 150.0) { sane = false; break }
+            }
+            if (!sane) { dropped++; continue }
             // 편마다 창 하나. 끝을 시작+1 로 두는 건 로더가 `end <= start` 를
             // 버리기 때문이고, 배차 1초는 위상 이동을 0 으로 만들기 위한 것이다.
             val w = ArrayList<Int>(a.starts.size * 3)
@@ -159,8 +218,14 @@ object RailTimetable {
         println("      실측 시각표 ${csv.name}: 평일 열차 ${"%,d".format(trains.size)}편 " +
             "→ 패턴 ${out.size}개 " + byLine.entries.joinToString(" ") { "${it.key}호선${it.value}" })
         println("      급행 패턴 ${out.count { it.express }}개 · " +
-            "실제 출발시각 ${"%,d".format(out.sumOf { it.windows.size / 3 })}개 · " +
-            "GML 에 없어 건너뛴 정차 ${"%,d".format(unmapped)}건 (역 ${unmappedNames.size}개)")
+            "실제 출발시각 ${"%,d".format(out.sumOf { it.windows.size / 3 })}개")
+        if (dropped > 0) println("      순서가 어긋나 버린 패턴 ${dropped}개 (열차코드 재사용 잔여)")
+        if (unmappedNames.isNotEmpty()) {
+            // **전부 찍는다.** 이름 하나가 조용히 안 붙으면 그 역에 열차가 안 서고,
+            // 그게 환승 거점이면 노선 몇 개가 통째로 끊긴다([ALIAS] 를 볼 것).
+            println("      ⚠️ 망에 없어 건너뛴 정차 ${"%,d".format(unmapped)}건 · " +
+                "역 ${unmappedNames.size}개: ${unmappedNames.sorted().joinToString(" · ")}")
+        }
         return out
     }
 
