@@ -41,6 +41,8 @@ object SubwayGtfs {
         network: Network,
         outFile: File,
         railCsv: File? = null,
+        /** KRIC 코레일 광역철도 시각표(`tools/kric_rail.py` 산출). 자세한 건 [RailTimetable]. */
+        kricCsv: File? = null,
         /**
          * [RailOsm] 이 뽑은 운행 계통. 주면 **합성 노선의 시간표를 이걸로 만든다.**
          *
@@ -57,8 +59,8 @@ object SubwayGtfs {
             meters[key(e.to, e.from)] = e.meters
         }
 
-        val rail = railCsv?.takeIf { it.exists() }?.let { RailTimetable.load(it, network) }
-            ?: emptyList()
+        val rail = railCsv?.takeIf { it.exists() }
+            ?.let { RailTimetable.load(it, kricCsv, network) } ?: emptyList()
         // 실측이 있는 노선은 합성을 **통째로** 건너뛴다. 섞으면 열차가 두 배가 된다.
         val realLines = rail.map { it.line }.toSet()
 

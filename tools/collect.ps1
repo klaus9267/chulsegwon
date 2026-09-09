@@ -127,6 +127,27 @@ if (-not (Test-Path $railCsv)) {
 }
 # ⚠️ --gml 을 주지 않는다. 주면 2020-12 기준 옛 망으로 돌아간다.
 #    철도망은 OSM(data/raw/osm/south-korea.osm.pbf)이 기본이다 — RailOsm 을 볼 것.
+#     ②는 코레일 광역철도(수인분당·경의중앙·경춘·서해·경강). 철도데이터포털
+#     「도시광역철도운행정보」 xlsx 를 파이썬이 CSV 로 푼다 — 빌더에 POI 를 안 들이려고.
+$kricXlsx = 'data/raw/rail/kric-korail-wide.xlsx'
+$kricCsv  = 'data/raw/rail/kric-wide.csv'
+if (-not (Test-Path $kricXlsx)) {
+    Say '▶ 코레일 광역철도 시각표 내려받기 (10MB)'
+    try {
+        Invoke-WebRequest -UseBasicParsing -OutFile $kricXlsx `
+            -Headers @{ Referer = 'https://data.kric.go.kr/rips/M_01_01/detail.do?id=6' } `
+            'https://data.kric.go.kr/rips/dataset/download.file?type=filedata&id=6&operation=1'
+        Say ('   {0:n0}KB' -f ((Get-Item $kricXlsx).Length / 1KB))
+    } catch {
+        Say ('   !! 못 받았다 — 그 5개 노선은 합성으로 돈다: ' + $_.Exception.Message)
+    }
+}
+if ((Test-Path $kricXlsx) -and (-not (Test-Path $kricCsv))) {
+    Say '▶ 코레일 시각표 xlsx → CSV'
+    & python (Join-Path $root 'tools\kric_rail.py') 2>&1 |
+        Where-Object { $_.Trim() } | ForEach-Object { Say ("   " + $_.Trim()) }
+}
+
 Step '지하철 GTFS' @('--mode','gtfssubway')
 
 # 4b) 불변식 — **참값 없이** 우리 탐색이 스스로 모순되는지 본다.

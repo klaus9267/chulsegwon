@@ -362,6 +362,7 @@ fun main(args: Array<String>) {
             network,
             File(opts["--out"] ?: "data/out/gtfs-subway.zip"),
             File(opts["--rail"] ?: "data/raw/rail/seoul-metro-timetable.csv"),
+            File(opts["--kric"] ?: "data/raw/rail/kric-wide.csv"),
             osmPatterns,
         )
         return

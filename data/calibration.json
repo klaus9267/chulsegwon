@@ -4,12 +4,12 @@
  "detourGyeonggi": 1.086,
  "longSegmentMeters": 1500.0,
  "longSegmentSpeedFactor": 0.9,
- "note": "카카오 구간 1118개 · 2026-09-09 18:31 · 평가셋 편향 +12초 · MAE 135초 · ±3분 74%",
- "fittedAt": "2026-09-09 18:31",
+ "note": "카카오 구간 1118개 · 2026-09-09 22:01 · 평가셋 편향 +14초 · MAE 134초 · ±3분 74%",
+ "fittedAt": "2026-09-09 22:01",
  "sample": 1118,
  "holdout": {
-  "bias": 12,
-  "mae": 135,
-  "within3min": 73.7
+  "bias": 14,
+  "mae": 134,
+  "within3min": 74.2
  }
 }
