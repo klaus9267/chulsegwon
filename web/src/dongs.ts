@@ -81,12 +81,6 @@ export interface DongFilter {
 export const FLAT_CLIMB_M = 10;
 
 /**
- * 도달권 안에 있으면서 예산에 맞는 동을 고른다.
- *
- * 단지와 같은 이유로 폴리곤 내부 판정을 하지 않는다. 등시선을 뽑기 전의 스칼라
- * 필드를 그대로 찍으면 O(1) 이다.
- */
-/**
  * 좌표 → 가장 가까운 동네 색인.
  *
  * **왜 필요한가.** 행렬은 동네까지만 안다. 건물 62,243동에는 동 코드가 없고 좌표뿐이라,
@@ -98,6 +92,32 @@ export const FLAT_CLIMB_M = 10;
  * 있다. 그래도 **뭉갠 필드를 찍는 것보다는 낫다** — 적어도 그 값은 어떤 실제 동네의
  * 실제 계산값이다. 건물은 확대했을 때만 보이는 보조 자료라 이 정도로 둔다.
  */
+/**
+ * 행렬의 도착 축과 `dongs.json` 이 같은 순서인지 확인한다.
+ *
+ * 코드 여러 곳이 "배열 색인 == 행렬 열 색인"을 **말없이 전제**한다. 두 파일을
+ * 서로 다른 배치 모드가 쓰기 때문에(`dongmatrix` vs `donggeo`/`deals`) 한쪽만
+ * 다시 만들면 조용히 어긋날 수 있고, 그러면 모든 동네가 남의 통근시간을 갖는다.
+ * 조용히 틀리느니 뜨지 않는 게 낫다.
+ */
+export function assertDongAxis(
+  dongs: Array<{ name: string }>,
+  manifestDongs: Array<{ name: string }>,
+): void {
+  if (dongs.length !== manifestDongs.length) {
+    throw new Error(
+      `동네 축 불일치: dongs.json ${dongs.length} vs manifest ${manifestDongs.length}`,
+    );
+  }
+  for (let i = 0; i < dongs.length; i++) {
+    if (dongs[i].name !== manifestDongs[i].name) {
+      throw new Error(
+        `동네 축 불일치: ${i}번이 dongs.json 은 '${dongs[i].name}', manifest 는 '${manifestDongs[i].name}'`,
+      );
+    }
+  }
+}
+
 export function buildNearestDong(all: Dong[]): (lat: number, lon: number) => number {
   // 위도 0.02° ≈ 2.2km. 동네 중심 사이 거리가 중앙 1.4km 라 한 칸에 한둘씩 들어간다.
   const CELL = 0.02;

@@ -48,8 +48,32 @@ class Raptor(private val d: TransitData) {
         var MAX_ROUNDS = 6
 
         /** 차를 타려면 이만큼 미리 도착해 있어야 한다. 계단·개찰구·정류장 찾기. */
-        const val BOARD_SLACK_SEC = 20
+        /**
+         * 차를 타려면 이만큼 미리 도착해 있어야 한다. 계단·개찰구·정류장 찾기.
+         *
+         * ⚠️ **어느 쪽에 붙이느냐가 방향마다 다르다.**
+         *
+         * 정방향은 승차 조건에 붙인다 — `ready + SLACK ≤ 차 시각`.
+         * 그런데 [TransitData.mirrored] 위에서 도는 역방향(= 우리 **출근 슬롯 전부**)
+         * 에서는 mirrored 축의 "승차"가 실제로는 **하차**다. 거기에 붙이면
+         * "내려서 20초 더 기다려라"가 되고, 그 때문에 연결을 놓치면 배차 한 대
+         * (20~45분)를 통째로 잃는다.
+         *
+         * 실측(무작위 120쌍을 정방향→역방향으로 되물음): 20초일 때 79건이 정방향보다
+         * 이르게 나왔고(중앙 376초·최대 5,211초) 3건은 길을 아예 잃었다. 0 으로
+         * 두면 위반이 0 이었다 — 즉 뒤집기 자체는 맞고 이 슬랙만 자리가 틀렸다.
+         *
+         * 그래서 역방향에서는 승차 조건이 아니라 **도착에** 더한다. 그러면 두 방향이
+         * 정확히 서로의 전치가 된다.
+         *
+         * `var` 인 이유는 진단용(`--boardslack`)이다. 평상시엔 20 이다.
+         */
+        var BOARD_SLACK_SEC = 20
     }
+
+    /** 정방향이면 승차 쪽에, 역방향이면 도착 쪽에 여유를 붙인다. */
+    private val boardSlack = if (d.isMirrored) 0 else BOARD_SLACK_SEC
+    private val arriveSlack = if (d.isMirrored) BOARD_SLACK_SEC else 0
 
     private val best = IntArray(d.stopCount)
     private val prev = IntArray(d.stopCount)
@@ -96,7 +120,9 @@ class Raptor(private val d: TransitData) {
                 for (i in from until stops.size) {
                     val s = stops[i]
                     if (tripStart < INF) {
-                        val arr = tripStart + offs[i]
+                        // 역방향에서는 여유를 승차가 아니라 **도착**에 붙인다
+                        // (BOARD_SLACK_SEC 의 주석을 볼 것).
+                        val arr = tripStart + offs[i] + arriveSlack
                         if (arr < best[s] && arr <= cutoffSec) {
                             best[s] = arr; nextMarked[s] = true; improved = true
                         }
@@ -105,7 +131,7 @@ class Raptor(private val d: TransitData) {
                     // 이번 라운드에 갱신된 값으로 타면 환승 횟수가 한 번 새어나간다.
                     val ready = prev[s]
                     if (ready < INF) {
-                        val cand = earliestTripStart(p, i, ready + BOARD_SLACK_SEC)
+                        val cand = earliestTripStart(p, i, ready + boardSlack)
                         if (cand < tripStart) tripStart = cand
                     }
                 }
@@ -121,13 +147,22 @@ class Raptor(private val d: TransitData) {
     /** 도보 환승. 갱신된 정류장에서만 뻗는다. */
     private fun relaxTransfers(cutoffSec: Int) {
         val src = marked.copyOf()
+        // **출발값도 스냅샷을 쓴다.** 예전엔 `src` 만 스냅샷이고 `best[s]` 는
+        // 살아있는 값을 읽었다. 그러면 낮은 색인 정류장이 s 를 도보로 개선한 뒤
+        // s 차례가 오면 **그 개선된 값에서 또 걷는다** — 도보가 2홉·3홉 이어지고,
+        // 어디까지 이어지느냐가 **정류장 색인 순서**에 달린다.
+        //
+        // 실제로 문제가 되는 자리: 출발지 시드는 역 주변 정류장 수십 개인데 이들이
+        // 서로 400m 안이라 거의 전부 이웃이다. 접근 도보 예산은 15분(900초)인데
+        // 거기에 환승 도보(최대 509초)가 한 번 더, 운 나쁘면 두 번 더 붙는다.
+        val from = best.copyOf()
         for (s in 0 until d.stopCount) {
             if (!src[s]) continue
             val t = d.transfers[s]
             var k = 0
             while (k < t.size) {
                 val to = t[k]
-                val arr = best[s] + t[k + 1]
+                val arr = from[s] + t[k + 1]
                 if (arr < best[to] && arr <= cutoffSec) { best[to] = arr; marked[to] = true }
                 k += 2
             }

@@ -22,6 +22,16 @@ fun main(args: Array<String>) {
     val transferOverhead = (opts["--transfer-overhead-sec"] ?: "90").toInt()
     val originLimit = (opts["--origins"] ?: "0").toInt()   // 0 = 전부. 실측용.
 
+    // 감도 스윕용. 평상시엔 안 준다. **모드 분기보다 앞에** 둬야 모든 모드에 먹는다.
+    opts["--boardslack"]?.toIntOrNull()?.let {
+        Raptor.BOARD_SLACK_SEC = it
+        println("      ⚠️ 승차 여유를 ${it}초로 바꿔 돈다 (진단)")
+    }
+    opts["--rounds"]?.toIntOrNull()?.let {
+        Raptor.MAX_ROUNDS = it
+        println("      ⚠️ 승차 상한을 ${it} 로 바꿔 돈다 (감도 측정)")
+    }
+
     if (opts["--mode"] == "reprice") {
         Deals.repriceComplexes(
             rawFiles = (opts["--in"] ?: "data/raw/rent/deals-raw.jsonl")
@@ -148,6 +158,15 @@ fun main(args: Array<String>) {
             println("        %-10s %s".format(name,
                 if (bv >= Raptor.INF) "도달 못함" else "${(bv - depart) / 60}분"))
         }
+        return
+    }
+
+    if (opts["--mode"] == "invariants") {
+        Invariants.run(
+            File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
+            File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            samples = (opts["--samples"] ?: "200").toInt(),
+        )
         return
     }
 
@@ -286,12 +305,6 @@ fun main(args: Array<String>) {
         "구간 ${network.trackEdges.size} / 환승 ${network.transferEdges.size}")
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
-
-    // 감도 스윕용. 평상시엔 안 준다.
-    opts["--rounds"]?.toIntOrNull()?.let {
-        Raptor.MAX_ROUNDS = it
-        println("      ⚠️ 승차 상한을 ${it} 로 바꿔 돈다 (감도 측정)")
-    }
 
     if (opts["--mode"] == "dongmatrix") {
         DongMatrix.build(

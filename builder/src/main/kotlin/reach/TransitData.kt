@@ -44,6 +44,14 @@ class TransitData(
     val patternRawWindows: Array<IntArray>? = null,
     /** 패턴별 위상 씨앗(trip_id 해시). [patternRawWindows] 와 짝이다. */
     val patternPhaseSeed: IntArray? = null,
+    /**
+     * 시간축이 뒤집힌 그래프인가.
+     *
+     * [Raptor] 가 승차 여유를 어느 쪽에 붙일지 정하는 데 쓴다. 뒤집힌 축에서는
+     * "승차"가 실제로는 하차라서, 여유를 승차 조건에 붙이면 **내려서 기다리라는**
+     * 뜻이 된다. 자세한 건 [Raptor.BOARD_SLACK_SEC].
+     */
+    val isMirrored: Boolean = false,
 ) {
     val stopCount get() = stopIds.size
     val patternCount get() = patternStops.size
@@ -382,6 +390,8 @@ class TransitData(
             Array(stopCount) { at[it].toIntArray() },
             transfers,          // 도보는 방향이 없다
             patternRoute,
+            patternRawWindows, patternPhaseSeed,
+            isMirrored = !isMirrored,
         )
     }
 

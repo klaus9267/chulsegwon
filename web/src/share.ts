@@ -22,6 +22,11 @@ export interface ShareState {
   tenure: Tenure;
   cap: number;
   amenities: string[];
+  /**
+   * 오르막을 뺄지. **답을 바꾸는 조건이라 반드시 실어야 한다.**
+   * 빠져 있어서, 켜고 보낸 링크가 받는 쪽에서는 꺼진 채 열렸다.
+   */
+  flatOnly: boolean;
 }
 
 export function encodeState(s: ShareState): string {
@@ -36,6 +41,8 @@ export function encodeState(s: ShareState): string {
   p.set("n", s.tenure === "WOLSE" ? "w" : "j");
   if (s.cap > 0) p.set("c", String(s.cap));
   if (s.amenities.length > 0) p.set("am", s.amenities.join(","));
+  // 답을 바꾸는 조건이라 반드시 싣는다. 기본값(꺼짐)일 때만 생략한다.
+  if (s.flatOnly) p.set("fl", "1");
   return p.toString();
 }
 
@@ -58,8 +65,10 @@ export function decodeState(hash: string): Partial<ShareState> {
   if (t !== undefined) out.timeIndex = t;
   const b = num("b", 10, 120);
   if (b !== undefined) out.budget = b;
-  const w = num("w", 0, 25);
+  // 행렬의 이탈 도보 예산이 15분이라 그 위는 뜻이 없다.
+  const w = num("w", 0, 15);
   if (w !== undefined) out.walkCap = w;
+  if (p.has("fl")) out.flatOnly = p.get("fl") === "1";
   const c = num("c", 0, 100000);
   if (c !== undefined) out.cap = c;
 

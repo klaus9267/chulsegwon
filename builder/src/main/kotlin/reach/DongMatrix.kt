@@ -63,8 +63,14 @@ object DongMatrix {
      * 그 표본의 소요시간과 짝이다. 따로 정렬하면 엉뚱한 짝이 남는다.
      *
      * 짝수 개면 아래쪽(작은 쪽)을 고른다 — 두 값을 평균내면 도보 짝을 못 고른다.
+     *
+     * ⚠️ **[total] 은 뽑은 표본 수(K), [n] 은 그중 도달한 수다.** 못 닿은 표본은
+     * "무한대"라 정렬하면 맨 뒤에 온다. 그러니 중앙값 자리는 `(n-1)/2` 가 아니라
+     * `(total-1)/2` 다. K=4·n=3 이면 우연히 같지만 K=5·n=3 이면 어긋나고,
+     * 어긋날 때는 **항상 빠른 쪽**을 골라 도달권을 부풀린다.
+     * 자리가 도달한 표본 밖이면 그 동네는 애초에 도달불가로 걸러진다.
      */
-    private fun medianIndex(sec: IntArray, walk: IntArray, n: Int): Int {
+    private fun medianIndex(sec: IntArray, walk: IntArray, n: Int, total: Int): Int {
         // n 이 8 이하라 삽입정렬이 가장 빠르다. 동네 1,768 × 슬롯 20 × 출발지 621 번 돈다.
         for (i in 1 until n) {
             val v = sec[i]; val w = walk[i]
@@ -72,7 +78,7 @@ object DongMatrix {
             while (j >= 0 && sec[j] > v) { sec[j + 1] = sec[j]; walk[j + 1] = walk[j]; j-- }
             sec[j + 1] = v; walk[j + 1] = w
         }
-        return (n - 1) / 2
+        return ((total - 1) / 2).coerceAtMost(n - 1)
     }
 
     /**
@@ -294,9 +300,16 @@ object DongMatrix {
                         walkRow[di] = 0
                         continue
                     }
-                    val mid = medianIndex(sampleSec, sampleWalk, got)
-                    row[di] = MatrixWriter.toMinuteByte(sampleSec[mid], capMinutes)
-                    walkRow[di] = ((sampleWalk[mid] + 30) / 60).coerceIn(0, 254).toByte()
+                    val mid = medianIndex(sampleSec, sampleWalk, got, k)
+                    val minute = MatrixWriter.toMinuteByte(sampleSec[mid], capMinutes)
+                    row[di] = minute
+                    // **도달불가면 도보도 0 이어야 한다.** 상한을 넘겨 255 가 된 칸에
+                    // 실제 도보 분이 남아 있었다(배포본 990,255칸 중 58,614칸, 5.9%).
+                    // 지금은 호출부가 항상 소요시간을 먼저 보므로 무해하지만, 도보를
+                    // 먼저 보는 코드가 하나 생기면 도달불가 동네가 필터를 통과한다.
+                    walkRow[di] =
+                        if (minute == MatrixWriter.UNREACHABLE_MINUTES.toByte()) 0
+                        else ((sampleWalk[mid] + 30) / 60).coerceIn(0, 254).toByte()
                 }
             }
             MatrixWriter.write(File(matrixDir, "$oi.bin"), slots, dongs.size, rows, walkRows)

@@ -11,7 +11,7 @@ import type { AmenityMap } from "./amenities";
 import { copyText, decodeState, encodeState } from "./share";
 import {
   FLAT_CLIMB_M, ROOM_LABEL, TREND_MONTHS,
-  buildDongGeoJSON, buildNearestDong, dongKey, filterDongs, loadDongs,
+  assertDongAxis, buildDongGeoJSON, buildNearestDong, dongKey, filterDongs, loadDongs,
 } from "./dongs";
 import { priceLabel } from "./dongs";
 import type { Dong, DongPick, RoomStat, RoomType, Tenure } from "./dongs";
@@ -238,7 +238,14 @@ async function main() {
    * 행렬이 동네까지만 알기 때문에 필요하다 — dongs.ts 의 buildNearestDong 을 볼 것.
    */
   let rentalDong: Int32Array | null = null;
+  /** 마지막으로 계산한 동네별 도달시간. 프로브가 여기서 읽는다(그림이 아니라). */
+  let lastMinutes = new Map<number, number>();
+  /** 좌표 → 가장 가까운 동네 색인. 동네 목록이 오면 한 번 만든다. */
+  let nearestDongIndex: ((lat: number, lon: number) => number) | null = null;
   void loadDongs(import.meta.env.BASE_URL + "data/").then((list) => {
+    // 두 파일을 서로 다른 배치 모드가 쓴다. 축이 어긋나면 모든 동네가 남의
+    // 통근시간을 갖는데, 화면은 멀쩡해 보인다. 조용히 틀리느니 안 뜨는 게 낫다.
+    if (list.length > 0) assertDongAxis(list, meta.dongs);
     dongs = list;
     for (const d of list) dongByKey.set(dongKey(d), d);
     if (list.length > 0) void render();
@@ -316,7 +323,16 @@ async function main() {
   });
 
   const timeSlider = $<HTMLInputElement>("time");
-  timeSlider.max = String(arriveSlots.length - 1);
+  // 도착 7개 / 출발 13개로 슬롯 수가 다르다. 부팅 때 한 번만 잡으면
+  // **출발 모드에서 뒤쪽 슬롯을 아예 못 고른다** — 배치가 계산해 둔 퇴근 시각의
+  // 절반이 화면에서 사라진다. 방향을 바꿀 때마다 다시 잡는다.
+  function syncTimeMax() {
+    const n = (state.direction === "ARRIVE_BY" ? arriveSlots : departSlots).length;
+    timeSlider.max = String(Math.max(0, n - 1));
+    if (state.timeIndex > n - 1) state.timeIndex = n - 1;
+    timeSlider.value = String(state.timeIndex);
+  }
+  syncTimeMax();
 
   applyShared();
   syncLabels();
@@ -429,11 +445,12 @@ async function main() {
       probe.hidden = true;
       return;
     }
-    const f = lastField;
-    const col = Math.round((at.lon - f.minLon) / f.dLon);
-    const row = Math.round((at.lat - f.minLat) / f.dLat);
-    const inside = col >= 0 && col < f.cols && row >= 0 && row < f.rows;
-    const minutes = inside ? f.values[row * f.cols + col] : Number.POSITIVE_INFINITY;
+    // **행렬에서 읽는다. 그림에서 읽으면 안 된다.**
+    // 목록은 고쳤는데 이 프로브만 `lastField` 를 그대로 찍고 있었다. 그래서
+    // 목록에 들어 있는 동네 위에 커서를 올려도 "예산 밖"이라고 말했다.
+    const di = nearestDongIndex ? nearestDongIndex(at.lat, at.lon) : -1;
+    const v = di >= 0 ? lastMinutes.get(di) : undefined;
+    const minutes = v === undefined ? Number.POSITIVE_INFINITY : v;
 
     const who = meta.stations[state.origin].name;
     if (minutes > state.budget) {
@@ -893,6 +910,7 @@ async function main() {
     if (q.timeIndex !== undefined) state.timeIndex = q.timeIndex;
     if (q.budget !== undefined) state.budget = q.budget;
     if (q.walkCap !== undefined) state.walkCap = q.walkCap;
+    if (q.flatOnly !== undefined) state.flatOnly = q.flatOnly;
     if (q.room) state.room = q.room;
     if (q.tenure) state.tenure = q.tenure;
     if (q.cap !== undefined) state.cap = q.cap;
@@ -917,12 +935,16 @@ async function main() {
    */
   function syncUrl() {
     const q = encodeState({
-      origin: meta.stations[state.origin].name,
-      origin2: state.origin2 === null ? null : meta.stations[state.origin2].name,
+      // **표시값을 싣는다.** 이름만 실으면 같은 이름의 역이 있을 때 링크가
+      // 엉뚱한 곳을 연다 — `양평` 이 5호선(서울)과 경의중앙선(양평군)에 하나씩
+      // 있고 둘은 53km 떨어져 있다. `resolveOrigin` 이 표시값을 먼저 본다.
+      origin: comboLabelFor(state.origin),
+      origin2: state.origin2 === null ? null : comboLabelFor(state.origin2),
       direction: state.direction,
       timeIndex: state.timeIndex,
       budget: state.budget,
       walkCap: state.walkCap,
+      flatOnly: state.flatOnly,
       room: state.room,
       tenure: state.tenure,
       cap: state.cap,
@@ -940,6 +962,7 @@ async function main() {
 
   function setDirection(d: Direction) {
     state.direction = d;
+    syncTimeMax();
     $("dirArrive").setAttribute("aria-pressed", String(d === "ARRIVE_BY"));
     $("dirDepart").setAttribute("aria-pressed", String(d === "DEPART_AT"));
     onInputChanged();
@@ -1019,7 +1042,12 @@ async function main() {
     // 것이라, 예산 안 동네의 48%가 목록에서 사라지고 남은 것도 +4.9분 부풀려졌다.
     // 도보 슬라이더를 0분으로 두면 100% 사라졌다.
     const minutesByIndex = new Map(within);
+    lastMinutes = minutesByIndex;
+    if (nearestDongIndex === null && dongs.length > 0) {
+      nearestDongIndex = buildNearestDong(dongs);
+    }
 
+    // `within` 이 이미 도보 상한으로 걸러진 목록이라, 그림도 그 목록만 칠한다.
     const field = buildField(meta.dongs, within, {
       budgetMinutes: state.budget,
       cellMeters: CELL_METERS,
