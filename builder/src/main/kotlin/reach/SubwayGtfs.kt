@@ -85,21 +85,24 @@ object SubwayGtfs {
             val freqs = StringBuilder("trip_id,start_time,end_time,headway_secs,exact_times\n")
 
             var loopTrips = 0
-            for ((line, chains) in network.lineSequences()) {
+            var throughLines = 0
+            for ((line, chains) in network.lineRuns()) {
                 val multiplier = Headways.multiplierFor(line)
-                // 체인마다, 그리고 그 안에 순환 구간이 있으면 두 바퀴짜리를 하나 더.
-                val runs = ArrayList<Pair<String, List<Int>>>()
-                for ((ci, chain) in chains.withIndex()) {
+                if (chains.any { it.headwayScale > 1 }) throughLines++
+                // 운행마다, 그리고 그 안에 순환 구간이 있으면 두 바퀴짜리를 하나 더.
+                val runs = ArrayList<Triple<String, List<Int>, Int>>()
+                for ((ci, run) in chains.withIndex()) {
+                    val chain = run.stops
                     if (chain.size < 2) continue
-                    runs += "$ci" to chain
+                    runs += Triple("$ci", chain, run.headwayScale)
                     val loop = circularPart(chain)
                     if (loop != null) {
                         // 두 바퀴. 절단점을 가로지르는 통행이 여기서 표현된다.
-                        runs += "${ci}c" to (loop + loop.drop(1))
+                        runs += Triple("${ci}c", loop + loop.drop(1), run.headwayScale)
                         loopTrips++
                     }
                 }
-                for ((ci, chain) in runs) {
+                for ((ci, chain, scale) in runs) {
                     for ((di, dir) in listOf(chain, chain.asReversed()).withIndex()) {
                         val tripId = "L${safe(line)}_${ci}_$di"
                         tripRows.append("L").append(safe(line)).append(",WD,")
@@ -119,7 +122,9 @@ object SubwayGtfs {
                         }
 
                         for (p in Headways.WEEKDAY) {
-                            val hw = (p.headwaySec * multiplier).toInt().coerceAtLeast(60)
+                            // [Network.lineRuns] 의 배수. 종점 쌍마다 운행을 만들면
+                            // 본선이 겹치므로, 겹친 만큼 배차를 늘려야 본선 빈도가 맞는다.
+                            val hw = (p.headwaySec * multiplier * scale).toInt().coerceAtLeast(60)
                             freqs.append(tripId).append(',').append(hms(p.startSec)).append(',')
                                 .append(hms(p.endSec)).append(',').append(hw).append(",1\n")
                             freqRows++
@@ -130,6 +135,7 @@ object SubwayGtfs {
             }
 
             if (loopTrips > 0) println("      순환 구간을 두 바퀴로 따로 내보낸 노선 ${loopTrips}개")
+            if (throughLines > 0) println("      분기 노선을 종점~종점 직통으로 편 노선 ${throughLines}개")
             entry(zip, "trips.txt", tripRows.toString())
             entry(zip, "stop_times.txt", stopTimes.toString())
             entry(zip, "frequencies.txt", freqs.toString())

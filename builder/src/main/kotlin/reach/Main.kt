@@ -161,6 +161,20 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "odcheck") {
+        OdCheck.run(
+            File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
+            File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            File(opts["--od"] ?: "tools/isochrone-od.json"),
+            File(opts["--walkgraph"] ?: "data/raw/osm/walk-graph.bin").takeIf { it.exists() },
+            phases = (opts["--phases"] ?: "8").toInt(),
+            budgetMinutes = (opts["--budget"] ?: "120").toInt(),
+            maxPerStop = (opts["--maxperstop"] ?: "64").toInt(),
+            out = File(opts["--out"] ?: "data/out/verify/odcheck.csv"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "invariants") {
         Invariants.run(
             File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
