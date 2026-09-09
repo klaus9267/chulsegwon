@@ -336,6 +336,15 @@ class TransitData(
      * 여러 소금으로 돌려 **중앙값**을 쓰면 그게 없어진다. 큰 배열(정류장·패턴·정차·
      * 환승)은 전부 공유하고 창만 새로 만든다 — 패턴 14,875개짜리라 사본이 400KB 다.
      */
+    /**
+     * ⚠️ **생산 경로에서는 더 안 쓴다.** 지하철 1~9호선에 실제 시각표가 들어오면서
+     * ([RailTimetable]) 그 노선의 배차는 1초짜리 창이 되고, [bake] 의 이동량
+     * `위상 mod 배차` 는 0 이 된다. 즉 위상을 다시 뽑아도 안 흔들린다.
+     * 지금은 [DongMatrix] 도 [OdCheck] 도 **출발 시각을 옮겨** 표본을 만든다.
+     *
+     * 진단용으로 남겨둔다 — "배차만 아는 노선이 답을 얼마나 흔드는가"를 따로 재려면
+     * 아직 이게 필요하다.
+     */
     fun rephase(salt: Int): TransitData {
         val raw = patternRawWindows ?: return this
         val seed = patternPhaseSeed ?: return this

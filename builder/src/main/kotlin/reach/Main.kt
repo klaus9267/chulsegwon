@@ -167,7 +167,8 @@ fun main(args: Array<String>) {
             File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
             File(opts["--od"] ?: "tools/isochrone-od.json"),
             File(opts["--walkgraph"] ?: "data/raw/osm/walk-graph.bin").takeIf { it.exists() },
-            phases = (opts["--phases"] ?: "8").toInt(),
+            sweepMinutes = (opts["--sweep"] ?: "60").toInt(),
+            stepMinutes = (opts["--step"] ?: "2").toInt(),
             budgetMinutes = (opts["--budget"] ?: "120").toInt(),
             maxPerStop = (opts["--maxperstop"] ?: "64").toInt(),
             out = File(opts["--out"] ?: "data/out/verify/odcheck.csv"),
@@ -331,14 +332,18 @@ fun main(args: Array<String>) {
             walkGraph = File(opts["--walkgraph"] ?: "data/raw/osm/walk-graph.bin"),
             // 배차 위상을 몇 번 뽑아 중앙값을 쓸지. 1 이면 예전과 같다.
             // 4 면 표본 6개 기준 중앙값과 90%가 2분 이내로 붙는다(실측).
-            phases = (opts["--phases"] ?: "4").toInt(),
+            samples = (opts["--samples"] ?: opts["--phases"] ?: "5").toInt(),
             maxPerStop = (opts["--maxperstop"] ?: "64").toInt(),
         )
         return
     }
 
     if (opts["--mode"] == "gtfssubway") {
-        SubwayGtfs.export(network, File(opts["--out"] ?: "data/out/gtfs-subway.zip"))
+        SubwayGtfs.export(
+            network,
+            File(opts["--out"] ?: "data/out/gtfs-subway.zip"),
+            File(opts["--rail"] ?: "data/raw/rail/seoul-metro-timetable.csv"),
+        )
         return
     }
 

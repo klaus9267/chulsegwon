@@ -32,13 +32,23 @@ object SubwayGtfs {
     /** 광역철도는 GTFS 로 2(Rail), 도시철도는 1(Subway). 라우터가 환승 규칙을 다르게 준다. */
     private val RAIL_LINES = listOf("경의중앙", "경춘", "수인분당", "경강", "서해", "공항철도")
 
-    fun export(network: Network, outFile: File) {
+    /**
+     * @param railCsv 서울교통공사 실측 시각표. 주면 그 노선(1~9호선)은 합성 대신
+     *   [RailTimetable] 이 뽑은 실제 운행 패턴으로 내보낸다. 나머지 노선은 그대로
+     *   [Headways] 합성이다.
+     */
+    fun export(network: Network, outFile: File, railCsv: File? = null) {
         outFile.parentFile?.mkdirs()
         val meters = HashMap<Long, Double>(network.trackEdges.size * 2)
         for (e in network.trackEdges) {
             meters[key(e.from, e.to)] = e.meters
             meters[key(e.to, e.from)] = e.meters
         }
+
+        val rail = railCsv?.takeIf { it.exists() }?.let { RailTimetable.load(it, network) }
+            ?: emptyList()
+        // 실측이 있는 노선은 합성을 **통째로** 건너뛴다. 섞으면 열차가 두 배가 된다.
+        val realLines = rail.map { it.line }.toSet()
 
         var trips = 0
         var stopTimeRows = 0
@@ -87,6 +97,7 @@ object SubwayGtfs {
             var loopTrips = 0
             var throughLines = 0
             for ((line, chains) in network.lineRuns()) {
+                if (line in realLines) continue          // 실측 시각표가 대신한다
                 val multiplier = Headways.multiplierFor(line)
                 if (chains.any { it.headwayScale > 1 }) throughLines++
                 // 운행마다, 그리고 그 안에 순환 구간이 있으면 두 바퀴짜리를 하나 더.
@@ -134,8 +145,35 @@ object SubwayGtfs {
                 }
             }
 
+            // ── 실측 시각표 ─────────────────────────────────────
+            for ((pi, p) in rail.withIndex()) {
+                val tripId = "R${safe(p.line)}_${if (p.express) "X" else "N"}_$pi"
+                tripRows.append("L").append(safe(p.line)).append(",WD,")
+                    .append(tripId).append(",0\n")
+                for (k in p.stops.indices) {
+                    val t = hms(p.offsets[k])
+                    stopTimes.append(tripId).append(',').append(t).append(',')
+                        .append(t).append(",PF").append(p.stops[k]).append(',')
+                        .append(k + 1).append('\n')
+                    stopTimeRows++
+                }
+                var w = 0
+                while (w < p.windows.size) {
+                    freqs.append(tripId).append(',').append(hms(p.windows[w])).append(',')
+                        .append(hms(p.windows[w + 1])).append(',')
+                        .append(p.windows[w + 2]).append(",1\n")
+                    freqRows++
+                    w += 3
+                }
+                trips++
+            }
+
             if (loopTrips > 0) println("      순환 구간을 두 바퀴로 따로 내보낸 노선 ${loopTrips}개")
             if (throughLines > 0) println("      분기 노선을 종점~종점 직통으로 편 노선 ${throughLines}개")
+            if (rail.isNotEmpty()) {
+                println("      실측으로 대체한 노선 ${realLines.size}개 · " +
+                    "합성으로 남은 노선 ${network.platforms.map { it.line }.distinct().count { it !in realLines }}개")
+            }
             entry(zip, "trips.txt", tripRows.toString())
             entry(zip, "stop_times.txt", stopTimes.toString())
             entry(zip, "frequencies.txt", freqs.toString())

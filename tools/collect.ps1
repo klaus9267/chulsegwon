@@ -104,6 +104,29 @@ Step '서울 버스'  @('--mode','seoulbus')
 Step 'GTFS 생성'  @('--mode','gtfs')
 Step 'GTFS 검사'  @('--mode','gtfscheck')
 
+# 4a) 지하철 — 1~9호선은 **실측 시각표**로 돈다.
+#
+#     서울교통공사 「서울 도시철도 열차운행시각표」(공공데이터포털 15098251,
+#     이용허락범위 제한 없음). 열차 한 편마다 역별 시각과 급행 여부를 준다.
+#     1호선은 코레일 구간(동인천·서동탄·신창)까지 102역이고, 8호선 별내·4호선
+#     진접처럼 metro_graph.gml(2020-12)에 없는 개통분도 들어 있다.
+#
+#     정적 파일이라 없을 때만 받는다 — 33MB 를 회차마다 받을 이유가 없다.
+$railCsv = 'data/raw/rail/seoul-metro-timetable.csv'
+if (-not (Test-Path $railCsv)) {
+    Say '▶ 지하철 실측 시각표 내려받기 (33MB)'
+    New-Item -ItemType Directory -Force (Split-Path $railCsv) | Out-Null
+    try {
+        Invoke-WebRequest -UseBasicParsing -OutFile $railCsv `
+            -Headers @{ Referer = 'https://www.data.go.kr/data/15098251/fileData.do' } `
+            'https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId=FILE_000000003657575&fileDetailSn=1'
+        Say ('   {0:n0}KB' -f ((Get-Item $railCsv).Length / 1KB))
+    } catch {
+        Say ('   !! 못 받았다 — 합성 시간표로 돈다: ' + $_.Exception.Message)
+    }
+}
+Step '지하철 GTFS' @('--mode','gtfssubway','--gml','data/raw/metro_graph.gml')
+
 # 4b) 불변식 — **참값 없이** 우리 탐색이 스스로 모순되는지 본다.
 #
 #     카카오 대조는 "시간표가 틀린 것"과 "탐색이 틀린 것"을 못 가른다. 실제로

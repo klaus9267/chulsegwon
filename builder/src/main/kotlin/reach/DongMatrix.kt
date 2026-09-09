@@ -27,11 +27,20 @@ object DongMatrix {
     private class Dong(val name: String, val gu: String, val lat: Double, val lon: Double)
 
     /**
-     * 위상 소금. 고정값이라 같은 입력이면 같은 결과가 나온다 —
-     * 배포 파일의 내용 해시가 흔들리면 안 되기 때문이다.
+     * 슬롯 안에서 **떠나는 순간**을 이만큼씩 옮겨가며 표본을 뽑는다(초).
+     *
+     * ⚠️ 예전엔 배차 **위상**을 소금으로 여러 번 뽑았다. 지하철 1~9호선에 실제
+     * 시각표가 들어온 뒤로는 그게 못 쓴다 — [TransitData.bake] 는 창 시작을
+     * `위상 mod 배차` 만큼 미는데, 실제 시각은 배차를 1초로 넣으므로 이동이 0 이다.
+     * 즉 위상을 아무리 다시 뽑아도 지하철은 안 흔들리고, **행렬 값이 "19:00 정각
+     * 한 순간"에 매달린다.** 급행이 19:03 에 오느냐 19:29 에 오느냐로 답이 20분
+     * 넘게 갈리는데 그중 하나만 찍는 셈이다.
+     *
+     * 떠나는 순간을 옮기면 시각표를 아는 노선이든 배차만 아는 노선이든 **상대
+     * 위상이 똑같이 흩어진다.** 사용자가 묻는 것도 "19시쯤 나서면"이지
+     * "19:00:00 에 나서면"이 아니다.
      */
-    private val SALTS = intArrayOf(0, 1_190_311, 51_147_071, 987_654_321,
-        12_345_701, 777_767_777, 424_242_469, 160_481_183)
+    private const val SAMPLE_STEP_SEC = 360      // 6분
 
     /**
      * [n] 개 표본을 소요시간 순으로 정렬하고 중앙값 자리를 돌려준다.
@@ -66,7 +75,8 @@ object DongMatrix {
         outDir: File,
         capMinutes: Int,
         walkGraph: File? = null,
-        phases: Int = 1,
+        /** 슬롯 안에서 출발 시각을 몇 번 옮겨 볼지. 자세한 건 [SAMPLE_STEP_SEC]. */
+        samples: Int = 1,
         /**
          * 정류장당 도보 환승 이웃 상한. 성능 상한이지 모델이 아니다 —
          * 자세한 근거는 [TransitData.linkNearbyStops] 를 볼 것.
@@ -113,20 +123,22 @@ object DongMatrix {
         println("      슬롯 ${slots.size}개 (도착 ${slots.count { it.direction == Direction.ARRIVE_BY }}" +
             " · 출발 ${slots.count { it.direction == Direction.DEPART_AT }})")
 
-        // 배차 위상을 여러 번 뽑아 **중앙값**을 쓴다.
+        // 슬롯 안에서 떠나는 순간을 옮겨가며 **중앙값**을 쓴다.
         //
-        // 우리는 시간표가 없고 배차만 안다. 위상(= 몇 시 몇 분에 오는 차인지)을
-        // `trip_id` 해시로 정하는데, 그건 한 표본이지 참값이 아니다. 소금 6개로
-        // 실측해보니 동네 도달시간의 표본 간 폭이 중앙 6분 · 90% 14분 · 최대 39분이고,
-        // 강남 45분 예산에서 후보 298곳 중 모든 표본에 드는 건 196곳(66%)뿐이었다.
-        // **답의 1/3을 해시가 정하고 있었다.**
+        // 시각표가 없는 노선(버스·13개 광역철도)은 배차만 아는데, 그 위상은 한 표본이지
+        // 참값이 아니다. 소금 6개로 실측했을 때 동네 도달시간의 표본 간 폭이 중앙 6분 ·
+        // 90% 14분 · 최대 39분이었고, 강남 45분 예산에서 후보 298곳 중 모든 표본에
+        // 드는 건 196곳(66%)뿐이었다. **답의 1/3을 해시가 정하고 있었다.**
         //
-        // 표본 4개면 6개 기준 중앙값과 90%가 2분 이내로 붙는다(실측). 그 이상은
-        // 배치 시간만 늘고 값이 거의 안 움직인다.
-        val k = phases.coerceAtLeast(1)
-        val fws = Array(k) { Raptor(if (it == 0) data else data.rephase(SALTS[it])) }
-        val bws = Array(k) { Raptor((if (it == 0) data else data.rephase(SALTS[it])).mirrored()) }
-        if (k > 1) println("      배차 위상 ${k}회 뽑아 중앙값 사용")
+        // 시각표가 있는 노선은 반대로 위상이 고정이라, 흔들리는 건 **우리가 언제
+        // 나서느냐**뿐이다. 둘 다 담는 방법이 출발 시각 훑기다.
+        val k = samples.coerceAtLeast(1)
+        val sampleOffsets = IntArray(k) { it * SAMPLE_STEP_SEC }
+        val fw = Raptor(data)
+        val bw = Raptor(data.mirrored())
+        if (k > 1) {
+            println("      출발 시각을 ${SAMPLE_STEP_SEC / 60}분 간격으로 ${k}회 옮겨 중앙값 사용")
+        }
 
         outDir.mkdirs()
         val matrixDir = File(outDir, "matrix")
@@ -142,16 +154,18 @@ object DongMatrix {
             for ((si, slot) in slots.withIndex()) {
                 val arriveBy = slot.direction == Direction.ARRIVE_BY
                 val t = if (arriveBy) -slot.secondsOfDay else slot.secondsOfDay
-                val origins = HashMap<Int, Int>(seeds.size / 2)
-                var q = 0
-                while (q < seeds.size) {
-                    val s = seeds[q]; val w = seeds[q + 1]
-                    val v = t + w
-                    if (v < (origins[s] ?: Int.MAX_VALUE)) origins[s] = v
-                    q += 2
-                }
+                // 표본마다 기준 시각을 옮긴다. 도착 기준(뒤집힌 축)에서는 t 가
+                // 음수라, 늦게 도착해도 되는 쪽으로 가려면 t 를 **줄여야** 한다.
                 val bests = Array(k) { pi ->
-                    (if (arriveBy) bws[pi] else fws[pi]).run(origins, t + capMinutes * 60)
+                    val tp = if (arriveBy) t - sampleOffsets[pi] else t + sampleOffsets[pi]
+                    val org = HashMap<Int, Int>(seeds.size / 2)
+                    var qq = 0
+                    while (qq < seeds.size) {
+                        val v = tp + seeds[qq + 1]
+                        if (v < (org[seeds[qq]] ?: Int.MAX_VALUE)) org[seeds[qq]] = v
+                        qq += 2
+                    }
+                    (if (arriveBy) bw else fw).run(org, tp + capMinutes * 60)
                 }
                 val row = rows[si]
                 val walkRow = walkRows[si]
@@ -174,7 +188,8 @@ object DongMatrix {
                             j += 2
                         }
                         if (bestSec < Raptor.INF) {
-                            sampleSec[got] = bestSec - t
+                            val tp = if (arriveBy) t - sampleOffsets[pi] else t + sampleOffsets[pi]
+                            sampleSec[got] = bestSec - tp
                             sampleWalk[got] = bestWalk
                             got++
                         }

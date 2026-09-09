@@ -16,7 +16,14 @@ import java.io.File
  *    걸리나"다. 배차 30분짜리 버스면 운 좋은 draw 와 기댓값이 15분 차이 난다.
  *    이건 **버그가 아니라 정의**다. 이사 갈 동네를 고르는 데엔 기댓값이 맞다.
  *
- * 그래서 여기서는 위상 표본을 **전부** 돌려 최솟값·중앙값·최댓값을 같이 낸다.
+ * 그래서 여기서는 **출발 시각을 훑어** 최솟값·중앙값·최댓값을 같이 낸다.
+ *
+ * ⚠️ **위상 표본이 아니라 출발 시각을 훑는다.** 예전엔 [TransitData.rephase] 로
+ * 배차 위상을 여러 번 뽑았는데, 지하철에 실제 시각표가 들어온 뒤로는 그게 못 쓴다 —
+ * 시각표를 아는 노선은 위상이 고정이라 아무리 뽑아도 안 흔들린다. 대신 **떠나는
+ * 순간**을 슬롯 안에서 2분 간격으로 옮기면 모든 노선에 대해 상대 위상이 골고루
+ * 흩어진다. 카카오가 뽑은 한 번도 이 분포에서 나온 표본이다.
+ *
  * 판정은 이렇게 읽는다.
  *
  * | 카카오가 앉은 자리 | 뜻 |
@@ -38,7 +45,7 @@ object OdCheck {
 
     fun run(
         subwayGtfs: File, busGtfs: File, odJson: File, walkGraph: File?,
-        phases: Int, budgetMinutes: Int, maxPerStop: Int, out: File,
+        sweepMinutes: Int, stepMinutes: Int, budgetMinutes: Int, maxPerStop: Int, out: File,
     ) {
         val t0 = System.currentTimeMillis()
         val walk = walkGraph?.takeIf { it.exists() }?.let { WalkGraph.load(it) }
@@ -68,14 +75,15 @@ object OdCheck {
                 (it["kakao"] as? Number)?.toInt() ?: -1,
             )
         }
-        println("      OD ${ods.size}개 · 슬롯 $slot · 예산 ${budgetMinutes}분")
+        println("      OD ${ods.size}개 · 슬롯 $slot · 예산 ${budgetMinutes}분 · " +
+            "출발 시각 ${sweepMinutes}분을 ${stepMinutes}분 간격으로 훑는다")
 
         val access = Access.Walkers(walk, data)
-        val k = phases.coerceAtLeast(1)
-        // [DongMatrix] 와 같은 소금을 쓴다. 다른 위상을 뽑으면 배포본을 검증하는 게 아니다.
-        val salts = intArrayOf(0, 1_190_311, 51_147_071, 987_654_321,
-            12_345_701, 777_767_777, 424_242_469, 160_481_183)
-        val fws = Array(k) { Raptor(if (it == 0) data else data.rephase(salts[it])) }
+        // 슬롯 안에서 떠나는 순간을 훑는다. 표본 하나가 곧 "이 분에 나섰다면".
+        val step = (stepMinutes * 60).coerceAtLeast(60)
+        val offsets = IntArray((sweepMinutes * 60 / step).coerceAtLeast(1)) { it * step }
+        val k = offsets.size
+        val raptor = Raptor(data)
 
         // 출발지는 몇 개 안 되니(3곳) 좌표별로 묶어 한 번만 탐색한다.
         val originKeys = ods.map { "%.6f,%.6f".format(it.olat, it.olon) }.distinct()
@@ -83,15 +91,18 @@ object OdCheck {
         for (key in originKeys) {
             val od = ods.first { "%.6f,%.6f".format(it.olat, it.olon) == key }
             val seeds = access.from(od.olat, od.olon)
-            val origins = HashMap<Int, Int>(seeds.size / 2)
-            var q = 0
-            while (q < seeds.size) {
-                val v = depart + seeds[q + 1]
-                if (v < (origins[seeds[q]] ?: Int.MAX_VALUE)) origins[seeds[q]] = v
-                q += 2
-            }
             println("      ${od.origin} 승차 후보 ${seeds.size / 2}개")
-            bestsByOrigin[key] = Array(k) { fws[it].run(origins, depart + budgetMinutes * 60) }
+            bestsByOrigin[key] = Array(k) { oi ->
+                val t0 = depart + offsets[oi]
+                val org = HashMap<Int, Int>(seeds.size / 2)
+                var q2 = 0
+                while (q2 < seeds.size) {
+                    val v = t0 + seeds[q2 + 1]
+                    if (v < (org[seeds[q2]] ?: Int.MAX_VALUE)) org[seeds[q2]] = v
+                    q2 += 2
+                }
+                raptor.run(org, t0 + budgetMinutes * 60)
+            }
         }
 
         val sb = StringBuilder("origin,band,dong,gu,ours,kakao,min,median,max,spread,walk,verdict\n")
@@ -112,7 +123,7 @@ object OdCheck {
                     }
                     j += 2
                 }
-                if (bs < Raptor.INF) got += (bs - depart) to bw
+                if (bs < Raptor.INF) got += (bs - depart - offsets[pi]) to bw
             }
             if (got.isEmpty()) {
                 unreached++
