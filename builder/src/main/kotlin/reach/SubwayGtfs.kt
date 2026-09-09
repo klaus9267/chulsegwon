@@ -37,7 +37,19 @@ object SubwayGtfs {
      *   [RailTimetable] 이 뽑은 실제 운행 패턴으로 내보낸다. 나머지 노선은 그대로
      *   [Headways] 합성이다.
      */
-    fun export(network: Network, outFile: File, railCsv: File? = null) {
+    fun export(
+        network: Network,
+        outFile: File,
+        railCsv: File? = null,
+        /**
+         * [RailOsm] 이 뽑은 운행 계통. 주면 **합성 노선의 시간표를 이걸로 만든다.**
+         *
+         * 없을 때는 [Network.lineRuns] 로 선로에서 계통을 되짚는데, 그건 자료에
+         * 계통이 없어서 하던 짓이다. OSM 은 계통 자체를 갖고 있고 거기엔 급행도
+         * 들어 있다 — 수인분당 급행, 1호선 특급처럼 되짚기로는 못 만드는 것들이다.
+         */
+        osmPatterns: List<RailOsm.Pattern>? = null,
+    ) {
         outFile.parentFile?.mkdirs()
         val meters = HashMap<Long, Double>(network.trackEdges.size * 2)
         for (e in network.trackEdges) {
@@ -96,7 +108,11 @@ object SubwayGtfs {
 
             var loopTrips = 0
             var throughLines = 0
-            for ((line, chains) in network.lineRuns()) {
+            // ── OSM 운행 계통 ────────────────────────────────────
+            if (osmPatterns != null) writeOsm(
+                osmPatterns, realLines, network, meters, tripRows, stopTimes, freqs,
+            ) { t, s, f -> trips += t; stopTimeRows += s; freqRows += f }
+            for ((line, chains) in if (osmPatterns != null) emptyMap() else network.lineRuns()) {
                 if (line in realLines) continue          // 실측 시각표가 대신한다
                 val multiplier = Headways.multiplierFor(line)
                 if (chains.any { it.headwayScale > 1 }) throughLines++
@@ -193,6 +209,76 @@ object SubwayGtfs {
         println("      운행 ${"%,d".format(trips)} · 정차 ${"%,d".format(stopTimeRows)}" +
             " · 배차 ${"%,d".format(freqRows)} · 환승 ${"%,d".format(network.transferEdges.size)}")
         println("      -> ${outFile.absolutePath}  ${"%,d".format(outFile.length() / 1024)}KB")
+    }
+
+    /**
+     * OSM 계통을 GTFS 운행으로 쓴다.
+     *
+     * **배차를 어떻게 나누나.** 한 노선에 계통이 여럿이라 전부에 노선 기본 배차를
+     * 주면 본선이 그만큼 촘촘해진다. 그래서 계통마다 자기가 서는 승강장들의
+     * **계통 수 중앙값**을 배수로 준다.
+     *
+     * 세 가지를 지킨다.
+     *
+     * 1. **방향을 가른다.** 한 승강장에 상행 2·하행 2가 서면 계통은 4개지만 한
+     *    방향으로 가려는 사람이 탈 수 있는 건 2개다. 4로 세면 대기가 두 배가 된다.
+     * 2. **최댓값이 아니라 중앙값.** 최댓값으로 잡으면 가장 붐비는 승강장만 정확해지고
+     *    나머지가 전부 성겨진다. 경의중앙에서 그렇게 하면 홍대입구가 25분 배차가 되는데
+     *    실제는 10분대다. 중앙값이면 흔한 승강장이 맞고 종점만 조금 촘촘해진다 —
+     *    **본선을 맞추는 쪽이 낫다.** 통행 대부분이 거기를 지난다.
+     * 3. **승강장으로 센다.** 대기는 역에서 하는 것이지 간선에서 하는 게 아니다.
+     *
+     * ⚠️ 이건 여전히 **추정**이다. 계통별 실제 운행 횟수를 아는 노선(1~9호선)은
+     * [RailTimetable] 이 대신하고 여기 안 온다.
+     */
+    private fun writeOsm(
+        patterns: List<RailOsm.Pattern>,
+        realLines: Set<String>,
+        network: Network,
+        meters: Map<Long, Double>,
+        tripRows: StringBuilder,
+        stopTimes: StringBuilder,
+        freqs: StringBuilder,
+        count: (Int, Int, Int) -> Unit,
+    ) {
+        // 계통을 전부 쓰면 배차가 288분까지 벌어진다. 노선을 덮는 최소 집합만 쓴다.
+        val use = RailOsm.serviceSet(patterns.filter { it.line !in realLines })
+        // (노선, 승강장) 마다 계통 수
+        val perStop = HashMap<Long, Int>(4096)
+        for (p in use) for (s in p.stops) perStop.merge(s.toLong() * 2 + p.dir, 1, Int::plus)
+
+        var trips = 0; var rows = 0; var freqRows = 0
+        for ((pi, p) in use.withIndex()) {
+            val multiplier = Headways.multiplierFor(p.line)
+            val counts = p.stops.map { perStop[it.toLong() * 2 + p.dir] ?: 1 }.sorted()
+            val scale = counts[counts.size / 2].coerceAtLeast(1)
+            val tripId = "O${safe(p.line)}_${if (p.express) "X" else "N"}_$pi"
+            tripRows.append("L").append(safe(p.line)).append(",WD,").append(tripId).append(",0\n")
+            var sec = 0
+            for ((k, s) in p.stops.withIndex()) {
+                if (k > 0) {
+                    val a = network.platforms[p.stops[k - 1]]
+                    val b = network.platforms[s]
+                    val m = meters[key(p.stops[k - 1], s)]
+                        ?: Geo.haversineMeters(a.lat, a.lon, b.lat, b.lon)
+                    sec += Headways.segmentSeconds(m)
+                }
+                val t = hms(sec)
+                stopTimes.append(tripId).append(',').append(t).append(',').append(t)
+                    .append(",PF").append(s).append(',').append(k + 1).append('\n')
+                rows++
+            }
+            for (w in Headways.WEEKDAY) {
+                val hw = (w.headwaySec * multiplier * scale).toInt().coerceAtLeast(60)
+                freqs.append(tripId).append(',').append(hms(w.startSec)).append(',')
+                    .append(hms(w.endSec)).append(',').append(hw).append(",1\n")
+                freqRows++
+            }
+            trips++
+        }
+        count(trips, rows, freqRows)
+        println("      OSM 계통 ${use.size}개를 합성 시각으로 내보냈다 " +
+            "(급행 ${use.count { it.express }}개 · 노선 ${use.map { it.line }.distinct().size}종)")
     }
 
     /**

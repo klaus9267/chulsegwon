@@ -161,6 +161,11 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "railscan") {
+        RailOsm.scan(File(opts["--pbf"] ?: "data/raw/osm/south-korea.osm.pbf"))
+        return
+    }
+
     if (opts["--mode"] == "odcheck") {
         OdCheck.run(
             File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
@@ -312,14 +317,28 @@ fun main(args: Array<String>) {
         return
     }
 
-    require(gml.exists()) { "GML 이 없다: ${gml.absolutePath}" }
-
-    println("[1/5] 그래프 로드: ${gml.name}")
-    val network = GmlLoader.load(gml, transferOverhead)
-    println("      역 ${network.stationCount} / 승강장 ${network.platformCount} / " +
-        "구간 ${network.trackEdges.size} / 환승 ${network.transferEdges.size}")
-    val chains = network.lineSequences()
-    println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
+    // 철도망은 **OSM 이 기본**이다. `metro_graph.gml` 은 2020-12 기준이라
+    // GTX-A·신림선·대곡소사선·별내선·진접선이 통째로 없다([RailOsm]).
+    // `--gml` 을 명시하면 옛 자료로 돌릴 수 있다 — 두 자료를 대볼 때 쓴다.
+    val pbf = File(opts["--pbf"] ?: "data/raw/osm/south-korea.osm.pbf")
+    val useOsm = opts["--gml"] == null && pbf.exists()
+    val network: Network
+    val osmPatterns: List<RailOsm.Pattern>?
+    if (useOsm) {
+        println("[1/5] 그래프 로드: OSM ${pbf.name}")
+        val built = RailOsm.build(pbf, transferOverhead)
+        network = built.first
+        osmPatterns = built.second
+    } else {
+        require(gml.exists()) { "GML 이 없다: ${gml.absolutePath}" }
+        println("[1/5] 그래프 로드: ${gml.name}  ⚠️ 2020-12 기준")
+        network = GmlLoader.load(gml, transferOverhead)
+        osmPatterns = null
+        println("      역 ${network.stationCount} / 승강장 ${network.platformCount} / " +
+            "구간 ${network.trackEdges.size} / 환승 ${network.transferEdges.size}")
+        val chains = network.lineSequences()
+        println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
+    }
 
     if (opts["--mode"] == "dongmatrix") {
         DongMatrix.build(
@@ -343,6 +362,7 @@ fun main(args: Array<String>) {
             network,
             File(opts["--out"] ?: "data/out/gtfs-subway.zip"),
             File(opts["--rail"] ?: "data/raw/rail/seoul-metro-timetable.csv"),
+            osmPatterns,
         )
         return
     }

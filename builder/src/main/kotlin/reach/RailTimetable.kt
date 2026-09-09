@@ -59,8 +59,13 @@ object RailTimetable {
      * 아래 [load] 가 못 붙인 역명을 전부 찍는 것도 같은 이유다 — 조용히 빠지면
      * 아무도 모른다.
      *
-     * 남은 것은 개명(총신대입구→이수, 당고개→불암산, 지제→평택지제)과
-     * [GmlLoader.fixName] 이 안 고치는 어순 뒤집힘(`삼거리신대방`) 이다.
+     * 남은 것은 **옛 자료(GML)용 되돌림표**다. GML 은 2020년 기준이라 개명 전
+     * 이름을 쓴다(이수→총신대입구, 불암산→당고개, 평택지제→지제) 하고 어순이
+     * 뒤집힌 것도 있다(신대방삼거리→삼거리신대방).
+     *
+     * OSM 망에는 **현재 이름**이 들어 있으므로 이 표가 필요 없다. 그래서 찾는 순서를
+     * `그대로 → 별칭 → 괄호 뗀 것` 으로 두고, 별칭은 못 찾았을 때만 쓴다.
+     * 그러면 자료원을 바꿔도 양쪽 다 붙는다.
      */
     private val ALIAS = mapOf(
         "신대방삼거리" to "삼거리신대방",
@@ -122,7 +127,11 @@ object RailTimetable {
             // 4,811편 중 6편이 자정을 넘는다.
             val sec = if (raw0 < 4 * 3600) raw0 + 86400 else raw0
             val name = v[cName]
-            val plat = byName["$line\u0000${ALIAS[name] ?: name}"]
+            // 이름을 그대로 → 별칭 → 괄호 뗀 것 순으로 찾는다. 자료원이 둘이라
+            // (OSM · GML) 이름 규칙이 다르고, 한쪽에만 맞추면 다른 쪽이 깨진다.
+            val plat = byName["$line\u0000$name"]
+                ?: ALIAS[name]?.let { byName["$line\u0000$it"] }
+                ?: byName["$line\u0000${name.substringBefore('(').trim()}"]
             if (plat == null) { unmapped++; unmappedNames += "$line $name"; continue }
             val key = "$line\u0000${v[cCode]}\u0000${v[cDir]}"
             trains.getOrPut(key) { ArrayList(60) } += Stop(sec, plat)

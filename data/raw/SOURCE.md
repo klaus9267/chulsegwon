@@ -1,4 +1,20 @@
-# metro_graph.gml
+# ⚠️ 철도 노선망은 이제 OSM 이다
+
+`metro_graph.gml` 은 **더 이상 기본이 아니다**(2026-09-09, ADR-39). `--gml` 을
+명시했을 때만 쓴다 — 두 자료를 대볼 때만.
+
+지금 쓰는 것: `data/raw/osm/south-korea.osm.pbf` (Geofabrik, **ODbL**).
+- 역 = 태그 붙은 노드(`railway=station`), 노선 = 릴레이션(`type=route, route=subway|light_rail|train`)
+- **정차 순서가 릴레이션 멤버 순서**이고, 운행 계통마다 릴레이션이 따로 있다 —
+  그래서 급행 정차 패턴이 그대로 나온다(수인분당 급행, 1호선 특급, 4호선 급행).
+- 수도권 노선 릴레이션 251개 · 정차 5,971개 · 이름 없는 정차 4개(0.1%) · 못 찾은 노드 0개
+- 2020년 이후 개통분 10종(GTX-A·신림선·대곡소사선·별내선·진접선·하남연장·석남연장·
+  연천연장·인천1 검단연장·서해선 일산) **전부 있음**
+- ⚠️ **ODbL 은 출처 표기를 요구한다.** 지도 attribution 과 웹 사이드바에 넣어뒀다.
+- 읽는 코드: `RailOsm.kt` (`--mode railscan` 으로 세어볼 수 있다)
+
+
+# metro_graph.gml  (옛 자료 — `--gml` 로만 쓴다)
 
 - 출처: https://github.com/stripe2933/SeoulMetropolitanSubway (MIT)
 - 기준: 2020-12

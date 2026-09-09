@@ -125,7 +125,9 @@ if (-not (Test-Path $railCsv)) {
         Say ('   !! 못 받았다 — 합성 시간표로 돈다: ' + $_.Exception.Message)
     }
 }
-Step '지하철 GTFS' @('--mode','gtfssubway','--gml','data/raw/metro_graph.gml')
+# ⚠️ --gml 을 주지 않는다. 주면 2020-12 기준 옛 망으로 돌아간다.
+#    철도망은 OSM(data/raw/osm/south-korea.osm.pbf)이 기본이다 — RailOsm 을 볼 것.
+Step '지하철 GTFS' @('--mode','gtfssubway')
 
 # 4b) 불변식 — **참값 없이** 우리 탐색이 스스로 모순되는지 본다.
 #
@@ -175,7 +177,7 @@ foreach ($f in @($zipPath, $subPath)) {
 $prev = if (Test-Path $stampPath) { (Get-Content $stampPath -Raw).Trim() } else { '' }
 $needMatrix = ($sig -ne '') -and ($sig -ne $prev)
 if ($needMatrix) {
-    Step '도달권 행렬' @('--mode','dongmatrix','--gml','data/raw/metro_graph.gml','--out','web/public/data')
+    Step '도달권 행렬' @('--mode','dongmatrix','--out','web/public/data')
     Set-Content -Path $stampPath -Value $sig -Encoding ASCII
 } else {
     Say '· 도달권 행렬 — GTFS 내용이 그대로라 건너뛴다'

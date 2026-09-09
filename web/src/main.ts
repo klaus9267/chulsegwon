@@ -1162,7 +1162,7 @@ function coreBounds(
   const lons: number[] = [];
   const lats: number[] = [];
   // ⚠️ `within` 은 **동네** 색인이다. 도착 축이 역에서 동네로 바뀌었는데 여기가
-  // 예전대로 meta.stations 를 보고 있었고, 동네 색인이 621을 넘으면 undefined 가
+  // 예전대로 meta.stations 를 보고 있었고, 동네 색인이 역 수를 넘으면 undefined 가
   // 나와 지도가 통째로 죽었다.
   for (const [i] of within) {
     const d = meta.dongs[i];

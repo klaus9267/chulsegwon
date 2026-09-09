@@ -16,7 +16,7 @@
   조건별 미리보기는 정적 호스팅에서 원리적으로 불가능하다. 대신 한 장을 제대로 만든다 —
   og.png 는 실제 계산 결과(강남 40분 이내 291개 역)로 그린 것이지 장식이 아니다.
 -->
-<meta name="description" content="직장 역을 고르면 통근 40분 안에 닿는 동네를 지도에 칠하고, 그 안에서 원룸·투룸 시세와 편의시설 조건에 맞는 동네를 추려줍니다. 수도권 전철 621역, 동네 시세 1,768곳, 전월세 실거래 33만 건." />
+<meta name="description" content="직장 역을 고르면 통근 40분 안에 닿는 동네를 지도에 칠하고, 그 안에서 원룸·투룸 시세와 편의시설 조건에 맞는 동네를 추려줍니다. 수도권 전철 657역, 동네 시세 1,768곳, 전월세 실거래 33만 건." />
 <meta name="theme-color" content="#2b6cb0" />
 
 <meta property="og:type" content="website" />
@@ -24,7 +24,7 @@
 <meta property="og:locale" content="ko_KR" />
 <meta property="og:url" content="https://klaus9267.github.io/chulsegwon/" />
 <meta property="og:title" content="출세권 — 통근 시간으로 살 곳 찾기" />
-<meta property="og:description" content="직장 역을 고르면 통근 40분 안에 닿는 동네와 원룸·투룸 시세를 지도에 칠합니다. 수도권 621역 · 동네 1,768곳 · 실거래 33만 건." />
+<meta property="og:description" content="직장 역을 고르면 통근 40분 안에 닿는 동네와 원룸·투룸 시세를 지도에 칠합니다. 수도권 657역 · 동네 1,768곳 · 실거래 33만 건." />
 <meta property="og:image" content="https://klaus9267.github.io/chulsegwon/og.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
@@ -260,6 +260,9 @@
     letter-spacing:-.3px; }
   .dlabel i{ font-size:9.5px; font-style:normal; color:#8a94a3; margin-top:1px; }
   .dlabel:hover{ transform:scale(1.08); box-shadow:0 3px 12px rgba(16,24,40,.2); z-index:10; }
+  .sources { margin: 18px 2px 4px; font-size: 11px; line-height: 1.7; color: #8a8f98; }
+  .sources a { color: #8a8f98; }
+
   /* 개별 건물 실거래 — 동 라벨과 형태로 구분한다. 색은 도달시간에만 쓴다 */
   .blabel{ position:relative; display:flex; flex-direction:column; align-items:center; line-height:1.12;
     padding:3px 7px 4px; border-radius:7px; background:rgba(255,255,255,.93);
@@ -531,6 +534,18 @@
       <div class="chips" id="amenityChips"></div>
     </section>
     <div id="warn" class="warn"></div>
+
+    <!--
+      자료 출처. ODbL(OpenStreetMap)은 산출물에 표기를 요구하고, 공공데이터도
+      출처 표시가 이용 조건이다. 지도 위에도 한 번 더 나온다(maplibre attribution).
+    -->
+    <p class="sources">
+      자료 ·
+      실거래가·건축물대장 <a href="https://www.data.go.kr/">국토교통부</a> ·
+      버스 <a href="https://www.data.go.kr/">TAGO</a>·<a href="https://www.gbis.go.kr/">GBIS</a> ·
+      지하철 시각표 <a href="https://www.data.go.kr/data/15098251/fileData.do">서울교통공사</a> ·
+      노선망·도보망 © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 (ODbL)
+    </p>
 
     </div><!-- /scroll -->
 

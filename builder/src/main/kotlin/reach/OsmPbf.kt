@@ -13,7 +13,12 @@ import java.util.zip.Inflater
  * 두 가지가 전부라 그 정도는 직접 읽는 게 낫다고 봤다.
  *
  * 대신 **완전한 protobuf 구현이 아니다.** OSM PBF 가 실제로 쓰는 필드만 읽고
- * 나머지는 건너뛴다. 릴레이션은 아예 읽지 않는다 — 도보 그래프에 필요 없다.
+ * 나머지는 건너뛴다.
+ *
+ * 2026-09: **릴레이션과 노드 태그**를 읽게 넓혔다. 도보 그래프에는 필요 없었는데
+ * 철도망을 여기서 뽑기로 하면서 필요해졌다 - 역은 태그 붙은 노드(railway=station)고,
+ * 노선은 릴레이션(type=route, route=subway)이며 정차 순서가 멤버 순서다.
+ * 둘 다 기본은 꺼져 있어서 도보 그래프를 만들 때 값을 치르지 않는다.
  *
  * 파일 구조:
  * ```
@@ -26,6 +31,30 @@ object OsmPbf {
 
     /** 노드 하나. 좌표는 이미 실수로 환산된 값이다. */
     class Node(val id: Long, val lat: Double, val lon: Double)
+
+    /**
+     * 태그가 붙은 노드. 역·정류장이 여기 들어온다.
+     *
+     * [Node] 와 따로 두는 이유는 비용이다. 남한 PBF 는 노드가 수천만 개인데 그중
+     * 태그가 있는 건 극소수다. 전부에 Map 을 하나씩 만들면 그것만으로 힙이 터진다.
+     * 그래서 태그가 실제로 있는 노드에만 이걸 준다.
+     */
+    class TaggedNode(val id: Long, val lat: Double, val lon: Double, val tags: Map<String, String>)
+
+    /**
+     * 릴레이션 하나. 노선이 여기 들어온다.
+     *
+     * [memberTypes] 는 PBF 의 enum 그대로다 - 0=노드, 1=웨이, 2=릴레이션.
+     * 정차 순서는 **멤버 순서**이고, 역할([memberRoles])이 stop / stop_entry_only /
+     * platform 인 멤버가 정차다.
+     */
+    class Relation(
+        val id: Long,
+        val tags: Map<String, String>,
+        val memberIds: LongArray,
+        val memberTypes: IntArray,
+        val memberRoles: Array<String>,
+    )
 
     /** 웨이 하나. 태그는 필요한 것만 담는다. */
     class Way(val id: Long, val refs: LongArray, val tags: Map<String, String>)
@@ -42,6 +71,11 @@ object OsmPbf {
         wantWays: Boolean,
         onNode: (Node) -> Unit = {},
         onWay: (Way) -> Unit = {},
+        /** 태그 붙은 노드를 받고 싶을 때만 켠다. 켜면 DenseNodes 의 keys_vals 도 푼다. */
+        wantNodeTags: Boolean = false,
+        onTaggedNode: (TaggedNode) -> Unit = {},
+        wantRelations: Boolean = false,
+        onRelation: (Relation) -> Unit = {},
     ) {
         require(file.exists()) { "PBF 가 없다: ${file.absolutePath}" }
         DataInputStream(file.inputStream().buffered(1 shl 20)).use { input ->
@@ -64,7 +98,10 @@ object OsmPbf {
                 if (type != "OSMData") continue
 
                 val block = inflateBlob(blob)
-                readPrimitiveBlock(block, wantNodes, wantWays, onNode, onWay)
+                readPrimitiveBlock(
+                    block, wantNodes, wantWays, onNode, onWay,
+                    wantNodeTags, onTaggedNode, wantRelations, onRelation,
+                )
             }
         }
     }
@@ -110,6 +147,10 @@ object OsmPbf {
         wantWays: Boolean,
         onNode: (Node) -> Unit,
         onWay: (Way) -> Unit,
+        wantNodeTags: Boolean,
+        onTaggedNode: (TaggedNode) -> Unit,
+        wantRelations: Boolean,
+        onRelation: (Relation) -> Unit,
     ) {
         var strings: Array<String> = emptyArray()
         val groups = ArrayList<ByteArray>()
@@ -138,11 +179,20 @@ object OsmPbf {
                 when (field) {
                     2 -> {
                         val body = r.bytes()
-                        if (wantNodes) readDense(body, granularity, latOffset, lonOffset, onNode)
+                        if (wantNodes || wantNodeTags) {
+                            readDense(
+                                body, granularity, latOffset, lonOffset, strings,
+                                wantNodes, onNode, wantNodeTags, onTaggedNode,
+                            )
+                        }
                     }
                     3 -> {
                         val body = r.bytes()
                         if (wantWays) readWay(body, strings, onWay)
+                    }
+                    4 -> {
+                        val body = r.bytes()
+                        if (wantRelations) readRelation(body, strings, onRelation)
                     }
                     else -> r.skip(field)
                 }
@@ -169,31 +219,89 @@ object OsmPbf {
         granularity: Long,
         latOffset: Long,
         lonOffset: Long,
+        strings: Array<String>,
+        wantNodes: Boolean,
         onNode: (Node) -> Unit,
+        wantNodeTags: Boolean,
+        onTaggedNode: (TaggedNode) -> Unit,
     ) {
         var ids: LongArray = LongArray(0)
         var lats: LongArray = LongArray(0)
         var lons: LongArray = LongArray(0)
+        // keys_vals: 노드마다 키,값 쌍이 이어지다가 **0 하나로 끝난다.** 태그가 없는
+        // 노드도 0 을 하나 차지한다. 그래서 배열 하나를 노드 순서대로 훑으며 잘라야
+        // 하고, 한 칸이라도 건너뛰면 그다음 노드부터 태그가 통째로 밀린다.
+        var kv: LongArray = LongArray(0)
         Reader(b).each { field, r ->
             when (field) {
                 1 -> ids = r.packedZigzag()
                 8 -> lats = r.packedZigzag()
                 9 -> lons = r.packedZigzag()
+                10 -> { val v = r.packedVarint(); if (wantNodeTags) kv = v }
                 else -> r.skip(field)
             }
         }
         var id = 0L; var lat = 0L; var lon = 0L
+        var k = 0
         val n = minOf(ids.size, lats.size, lons.size)
         for (i in 0 until n) {
             id += ids[i]; lat += lats[i]; lon += lons[i]
-            onNode(
-                Node(
-                    id,
-                    1e-9 * (latOffset + granularity * lat),
-                    1e-9 * (lonOffset + granularity * lon),
-                ),
-            )
+            val la = 1e-9 * (latOffset + granularity * lat)
+            val lo = 1e-9 * (lonOffset + granularity * lon)
+            if (wantNodes) onNode(Node(id, la, lo))
+            if (!wantNodeTags || k >= kv.size) continue
+            if (kv[k] == 0L) { k++; continue }
+            val tags = HashMap<String, String>(4)
+            while (k + 1 < kv.size && kv[k] != 0L) {
+                val ki = kv[k].toInt(); val vi = kv[k + 1].toInt()
+                if (ki < strings.size && vi < strings.size) tags[strings[ki]] = strings[vi]
+                k += 2
+            }
+            k++
+            if (tags.isNotEmpty()) onTaggedNode(TaggedNode(id, la, lo, tags))
         }
+    }
+
+    /**
+     * Relation: 1=id, 2=keys, 3=vals, 8=roles_sid, 9=memids(델타 sint64), 10=types.
+     *
+     * 멤버 순서가 곧 노선의 정차 순서라 **순서를 흐트러뜨리면 안 된다.**
+     */
+    private fun readRelation(b: ByteArray, strings: Array<String>, onRelation: (Relation) -> Unit) {
+        var id = 0L
+        var keys: LongArray = LongArray(0)
+        var vals: LongArray = LongArray(0)
+        var roles: LongArray = LongArray(0)
+        var mem: LongArray = LongArray(0)
+        var types: LongArray = LongArray(0)
+        Reader(b).each { field, r ->
+            when (field) {
+                1 -> id = r.varint()
+                2 -> keys = r.packedVarint()
+                3 -> vals = r.packedVarint()
+                8 -> roles = r.packedVarint()
+                9 -> mem = r.packedZigzag()
+                10 -> types = r.packedVarint()
+                else -> r.skip(field)
+            }
+        }
+        val tags = HashMap<String, String>(keys.size.coerceAtLeast(1))
+        for (i in keys.indices) {
+            val ki = keys[i].toInt()
+            val vi = vals.getOrNull(i)?.toInt() ?: continue
+            if (ki < strings.size && vi < strings.size) tags[strings[ki]] = strings[vi]
+        }
+        val n = minOf(mem.size, types.size)
+        val ids = LongArray(n)
+        var acc = 0L
+        for (i in 0 until n) { acc += mem[i]; ids[i] = acc }
+        onRelation(
+            Relation(
+                id, tags, ids,
+                IntArray(n) { types[it].toInt() },
+                Array(n) { i -> roles.getOrNull(i)?.toInt()?.let { strings.getOrNull(it) } ?: "" },
+            ),
+        )
     }
 
     /** Way: 1=id, 2=keys, 3=vals, 8=refs(델타 sint64). */

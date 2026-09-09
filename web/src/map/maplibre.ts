@@ -50,7 +50,11 @@ function vworldStyle(key: string): maplibregl.StyleSpecification {
         // 브이월드 WMTS 는 {z}/{y}/{x} 순서다. x,y 를 바꿔 쓰면 엉뚱한 타일이 온다.
         tiles: ["https://api.vworld.kr/req/wmts/1.0.0/" + key + "/Base/{z}/{y}/{x}.png"],
         tileSize: 256,
-        attribution: '<a href="https://www.vworld.kr/">VWorld</a>',
+        // ⚠️ **OSM 표기를 빼면 안 된다.** 배경 타일은 브이월드지만 도보망과
+        // 철도 노선망이 OpenStreetMap 이고, ODbL 은 산출물에 출처 표기를 요구한다.
+        attribution:
+          '<a href="https://www.vworld.kr/">VWorld</a> · ' +
+          '경로 © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자',
       },
     },
     layers: [{ id: "vworld", type: "raster", source: "vworld" }],
