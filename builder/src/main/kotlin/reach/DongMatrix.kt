@@ -264,7 +264,10 @@ object DongMatrix {
     ) {
         val sb = StringBuilder()
         sb.append("{\n  \"version\": 2,\n  \"generatedBy\": \"raptor-gtfs\",\n")
-        sb.append("  \"warning\": \"배차간격 기반 합성 시간표다. 실제 편성 시각표는 공공에 없다.\",\n")
+        // ⚠️ 예전엔 "실제 편성 시각표는 공공에 없다"고 적혀 있었다. 틀린 말이었다 —
+        // 1~9호선은 서울교통공사가 공개한다([RailTimetable]). 남은 노선만 합성이다.
+        sb.append("  \"warning\": \"지하철 1~9호선은 실측 시각표(서울교통공사), " +
+            "그 밖의 광역철도 13개 노선과 버스는 배차간격 기반 합성 시간표다.\",\n")
         sb.append("  \"transferOverheadSeconds\": 0,\n")
         sb.append("  \"note\": \"도착 축이 역이 아니라 법정동이다. 지하철+버스+도보 통합.\",\n")
         sb.append("  \"capMinutes\": ").append(cap).append(",\n  \"slots\": [\n")
