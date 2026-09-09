@@ -48,6 +48,22 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "fleetfit") {
+        BusHeadway.fit(
+            File(opts["--dir"] ?: "data/raw/seoul-bus/fleet"),
+            File(opts["--out"] ?: "data/bus-headway.json"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "busfleet") {
+        val key = System.getenv("DATA_GO_KR_KEY")
+            ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
+        BusFleet.snapshot(key, File(opts["--dir"] ?: "data/raw/seoul-bus"),
+            limit = (opts["--limit"] ?: "60").toInt())
+        return
+    }
+
     if (opts["--mode"] == "seoulbus" || opts["--mode"] == "seoulspeed") {
         val key = System.getenv("DATA_GO_KR_KEY")
             ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
@@ -156,6 +172,7 @@ fun main(args: Array<String>) {
             villageDir = File(opts["--village"] ?: "data/raw/gbis"),
             outFile = File(opts["--out"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
             calibrationFile = File(opts["--calibration"] ?: "data/calibration.json"),
+            headwayProfile = File(opts["--headway"] ?: "data/bus-headway.json"),
         )
         return
     }

@@ -451,8 +451,11 @@ object Gtfs {
     fun export(
         gyeonggiDir: File, seoulDir: File, villageDir: File,
         outFile: File, calibrationFile: File,
+        headwayProfile: File? = null,
     ) {
         val cal = loadCalibration(calibrationFile)
+        val profile = BusHeadway.load(headwayProfile ?: File("data/bus-headway.json"))
+        println("      배차 시간대 배율: " + profile.note)
         println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 서울 ×${"%.3f".format(cal.detour)}" +
             " 경기 ×${"%.3f".format(cal.detourGyeonggi)}" +
             " · ${cal.longSegmentMeters.toInt()}m↑ 속도 ×${"%.2f".format(cal.longSegmentSpeedFactor)}" +
@@ -489,7 +492,7 @@ object Gtfs {
         val model = SpeedModel(speed.observations { rid -> routes["S$rid"]?.type })
         println("      속도 곡선(구간길이:km/h) ${model.describe()}")
         model.describeTypes().forEach { println(it) }
-        write(outFile, stops, routes, trips, speed, model, cal)
+        write(outFile, stops, routes, trips, speed, model, cal, profile)
     }
 
     // ── 서울 ────────────────────────────────────────────────────
@@ -746,6 +749,7 @@ object Gtfs {
     private fun write(
         outFile: File, stops: Map<String, Stop>, routes: Map<String, Route>,
         trips: List<Trip>, speed: SpeedTable, model: SpeedModel, cal: Calibration,
+        profile: BusHeadway.Profile,
     ) {
         outFile.parentFile?.mkdirs()
 
@@ -862,9 +866,10 @@ object Gtfs {
                     // 우리 RAPTOR 는 `start + k×headway` 로 정확히 푸므로(위상을 창에
                     // 구워둔다) 1 이 우리가 실제로 뜻하는 바다. 0 은 자기 자신에 대한
                     // 거짓말이었고, 그 상태로는 어떤 바깥 엔진과도 대조가 안 된다.
-                    freqs.append(tripId).append(',').append(hm(r.first)).append(',')
-                        .append(hmAfter(r.last, r.first)).append(',')
-                        .append(sv.second * 60).append(",1\n")
+                    for (w in windows(r.first, r.last, sv.second * 60, r.type, profile)) {
+                        freqs.append(tripId).append(',').append(w[0]).append(',')
+                            .append(w[1]).append(',').append(w[2]).append(",1\n")
+                    }
                 }
             }
 
@@ -968,6 +973,61 @@ object Gtfs {
      * 그게 "운행일 기준"이라는 뜻이고, 안 그러면 `end_time < start_time` 이라
      * 검증기가 튕긴다. 실제로 0430 출발 0110 막차인 노선이 있다.
      */
+    /**
+     * 첫차~막차를 **시간대별 창**으로 쪼갠다.
+     *
+     * 배율이 전부 1.0 이면(= 프로파일이 없거나 그 유형을 모르면) 인접 창의 배차가
+     * 같아져 하나로 합쳐진다. 그래서 자료가 쌓이기 전에는 결과가 안 바뀐다.
+     *
+     * 자정을 넘는 막차는 [hmAfter] 가 24시 이상으로 밀어주므로 그 축 위에서 자른다.
+     */
+    private fun windows(
+        first: String, last: String, headwaySec: Int, type: String, profile: BusHeadway.Profile,
+    ): List<Array<String>> {
+        val startHms = hm(first)
+        val endHms = hmAfter(last, first)
+        val startMin = toMin(startHms)
+        val endMin = toMin(endHms)
+        if (endMin <= startMin) return listOf(arrayOf(startHms, endHms, headwaySec.toString()))
+
+        val cuts = sortedSetOf(startMin, endMin)
+        for ((a, _) in BusHeadway.BUCKETS) {
+            // 막차가 25시까지 가는 노선이 있어 하루 넘긴 경계도 후보로 둔다.
+            for (d in listOf(0, 1440)) {
+                val c = a + d
+                if (c > startMin && c < endMin) cuts += c
+            }
+        }
+        val sorted = cuts.toList()
+
+        val out = ArrayList<Array<String>>(sorted.size)
+        for (i in 0 until sorted.size - 1) {
+            val a = sorted[i]
+            val b = sorted[i + 1]
+            val h = Math.max(60, Math.round(headwaySec * profile.factor(type, a % 1440)).toInt())
+            // 창 안에 차가 한 대도 안 서면 의미가 없다
+            if ((b - a) * 60 < h) continue
+            out += arrayOf(fromMin(a), fromMin(b), h.toString())
+        }
+        if (out.isEmpty()) return listOf(arrayOf(startHms, endHms, headwaySec.toString()))
+
+        // 인접 창의 배차가 같으면 합친다. 배율이 전부 1.0 이면 결국 하나가 된다.
+        val merged = ArrayList<Array<String>>(out.size)
+        for (w in out) {
+            val prev = merged.lastOrNull()
+            if (prev != null && prev[2] == w[2]) merged[merged.size - 1] = arrayOf(prev[0], w[1], w[2])
+            else merged += w
+        }
+        return merged
+    }
+
+    private fun toMin(hhmmss: String): Int {
+        val p = hhmmss.split(':')
+        return p[0].toInt() * 60 + p[1].toInt()
+    }
+
+    private fun fromMin(m: Int): String = "%02d:%02d:00".format(m / 60, m % 60)
+
     private fun hmAfter(v: String, after: String): String {
         val a = v.filter { it.isDigit() }.padStart(4, '0').take(4)
         val b = after.filter { it.isDigit() }.padStart(4, '0').take(4)
