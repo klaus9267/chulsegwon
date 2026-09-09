@@ -87,14 +87,21 @@ object BusHeadway {
     }
 
     /**
-     * `fleet` 아래의 스냅샷을 모아 유형별 시간대 배율을 낸다.
+     * `fleet`(서울)·`fleet-gg`(경기·인천) 아래의 스냅샷을 모아 배율을 낸다.
+     *
+     * 유형 이름이 지역마다 다르다 — 서울은 코드(`3`=간선), 경기는 이름(`일반버스`).
+     * 그래서 섞어도 유형 키가 안 겹치고, 각자 자기 배율을 얻는다.
      *
      * 파일명이 `yyyyMMdd-HHmm.jsonl` 이라 거기서 시각을 읽는다.
      */
-    fun fit(fleetDir: File, out: File) {
+    fun fit(fleetDirs: List<File>, out: File) {
         val mapper = ObjectMapper().registerKotlinModule()
-        val files = fleetDir.listFiles { f -> f.name.endsWith(".jsonl") }?.sorted() ?: emptyList()
-        require(files.isNotEmpty()) { "운행대수 스냅샷이 없다: ${fleetDir.absolutePath}" }
+        val files = fleetDirs.flatMap { d ->
+            d.listFiles { f -> f.name.endsWith(".jsonl") }?.toList() ?: emptyList()
+        }.sortedBy { it.name }
+        require(files.isNotEmpty()) {
+            "운행대수 스냅샷이 없다: " + fleetDirs.joinToString { it.absolutePath }
+        }
 
         // 유형 -> 시간대 -> 노선별 대수 목록
         val acc = HashMap<String, Array<MutableList<Int>>>()

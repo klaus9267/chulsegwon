@@ -50,7 +50,10 @@ fun main(args: Array<String>) {
 
     if (opts["--mode"] == "fleetfit") {
         BusHeadway.fit(
-            File(opts["--dir"] ?: "data/raw/seoul-bus/fleet"),
+            listOf(
+                File("data/raw/seoul-bus/fleet"),
+                File("data/raw/seoul-bus/fleet-gg"),
+            ).filter { it.isDirectory },
             File(opts["--out"] ?: "data/bus-headway.json"),
         )
         return
@@ -59,8 +62,15 @@ fun main(args: Array<String>) {
     if (opts["--mode"] == "busfleet") {
         val key = System.getenv("DATA_GO_KR_KEY")
             ?: error("DATA_GO_KR_KEY 가 없다. .env 를 읽고 실행할 것")
-        BusFleet.snapshot(key, File(opts["--dir"] ?: "data/raw/seoul-bus"),
-            limit = (opts["--limit"] ?: "60").toInt())
+        val n = (opts["--limit"] ?: "60").toInt()
+        if (opts["--region"] == "gg") {
+            BusFleet.snapshotGyeonggi(
+                key, File(opts["--busdir"] ?: "data/raw/bus"),
+                File(opts["--dir"] ?: "data/raw/seoul-bus"), limit = n,
+            )
+        } else {
+            BusFleet.snapshot(key, File(opts["--dir"] ?: "data/raw/seoul-bus"), limit = n)
+        }
         return
     }
 

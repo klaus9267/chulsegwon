@@ -93,6 +93,8 @@ Step '서울 구간속도 스냅샷' @('--mode','seoulspeed','--limit','320')
 #     `배차 = 왕복시간 ÷ 대수` 이므로 시각만 바꿔 세서 비율을 얻을 수 있다.
 #     자세한 근거는 builder .. BusFleet.kt 를 볼 것.
 Step '서울 운행대수 스냅샷' @('--mode','busfleet','--limit','60')
+Step '경기 운행대수 스냅샷' @('--mode','busfleet','--region','gg','--limit','60')
+Step '배차 시간대 배율'   @('--mode','fleetfit')
 
 # 2~3) 노선·정류장 — 이미 끝났으면 즉시 반환한다
 Step '경기 버스'  @('--mode','bus')
