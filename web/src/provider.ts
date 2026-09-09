@@ -7,6 +7,14 @@ import { UNREACHABLE_MINUTES } from "./types";
 
 const MAGIC = "TRMX";
 const HEADER_BYTES = 10;
+/** flags 비트 0: 총시간 평면 뒤에 이탈 도보(분) 평면이 한 벌 더 있다. */
+const FLAG_WALK_PLANE = 1;
+
+interface OriginData {
+  body: Uint8Array;
+  slots: number;
+  hasWalk: boolean;
+}
 
 /**
  * ngrok 무료 플랜은 첫 방문에 경고 페이지를 끼워넣는데, 그게 .bin 요청까지 가로채
@@ -22,7 +30,7 @@ const FETCH_INIT: RequestInit = { headers: { "ngrok-skip-browser-warning": "1" }
  * 설계할 때 노린 게 그거였다.
  */
 export class StationMatrixProvider implements ReachabilityProvider {
-  private cache = new Map<number, Uint8Array>();
+  private cache = new Map<number, OriginData>();
 
   private constructor(
     private readonly meta: Manifest,
@@ -40,21 +48,29 @@ export class StationMatrixProvider implements ReachabilityProvider {
   }
 
   async reachability(origin: number, slotIndex: number): Promise<ReachabilitySet> {
-    const matrix = await this.fetchOrigin(origin);
+    const { body, slots, hasWalk } = await this.fetchOrigin(origin);
     const n = this.meta.dongs.length;
-    const offset = slotIndex * n;
-    const row = matrix.subarray(offset, offset + n);
+    const row = body.subarray(slotIndex * n, (slotIndex + 1) * n);
+    // 도보 평면은 총시간 평면 **전체 뒤**에 온다. 옛 파일에는 없다.
+    const walkRow = hasWalk
+      ? body.subarray((slots + slotIndex) * n, (slots + slotIndex + 1) * n)
+      : null;
 
     return {
       minutesTo(i) {
         const v = row[i];
         return v === UNREACHABLE_MINUTES ? null : v;
       },
-      within(budget) {
+      walkTo(i) {
+        return walkRow ? walkRow[i] : null;
+      },
+      within(budget, walkCap) {
         const out: Array<[number, number]> = [];
         for (let i = 0; i < row.length; i++) {
           const v = row[i];
-          if (v !== UNREACHABLE_MINUTES && v <= budget) out.push([i, v]);
+          if (v === UNREACHABLE_MINUTES || v > budget) continue;
+          if (walkRow && walkCap !== undefined && walkRow[i] > walkCap) continue;
+          out.push([i, v]);
         }
         return out;
       },
@@ -65,7 +81,7 @@ export class StationMatrixProvider implements ReachabilityProvider {
    * 출발역 파일 하나(약 140KB)만 받는다. 이후 시각·예산 슬라이더를 아무리 움직여도
    * 네트워크 호출이 없다 — threshold 를 계산에서 분리한 설계의 핵심 이득.
    */
-  private async fetchOrigin(origin: number): Promise<Uint8Array> {
+  private async fetchOrigin(origin: number): Promise<OriginData> {
     const hit = this.cache.get(origin);
     if (hit) return hit;
 
@@ -76,15 +92,17 @@ export class StationMatrixProvider implements ReachabilityProvider {
     const magic = String.fromCharCode(...buf.subarray(0, 4));
     if (magic !== MAGIC) throw new Error(`포맷이 아니다: ${magic}`);
 
+    const hasWalk = (buf[5] & FLAG_WALK_PLANE) !== 0;
     const slots = buf[6] | (buf[7] << 8);
     const stations = buf[8] | (buf[9] << 8);
-    const expected = HEADER_BYTES + slots * stations;
+    const planes = hasWalk ? 2 : 1;
+    const expected = HEADER_BYTES + planes * slots * stations;
     if (buf.length !== expected) {
       throw new Error(`크기 불일치: ${buf.length} != ${expected}`);
     }
 
-    const body = buf.subarray(HEADER_BYTES);
-    this.cache.set(origin, body);
-    return body;
+    const data: OriginData = { body: buf.subarray(HEADER_BYTES), slots, hasWalk };
+    this.cache.set(origin, data);
+    return data;
   }
 }

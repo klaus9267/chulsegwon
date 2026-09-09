@@ -36,6 +36,14 @@ class TransitData(
     /** 도보 환승. `transfers[stop]` 이 (상대 정류장, 초) 쌍의 평탄 배열. */
     var transfers: Array<IntArray>,
     val patternRoute: Array<String>,
+    /**
+     * 위상을 **더하기 전의** 창. `(start, end, headway)` 삼중항이 이어진 배열이다.
+     *
+     * [rephase] 가 이걸로 다른 위상의 시간표를 만든다.
+     */
+    val patternRawWindows: Array<IntArray>? = null,
+    /** 패턴별 위상 씨앗(trip_id 해시). [patternRawWindows] 와 짝이다. */
+    val patternPhaseSeed: IntArray? = null,
 ) {
     val stopCount get() = stopIds.size
     val patternCount get() = patternStops.size
@@ -55,6 +63,8 @@ class TransitData(
             val pStops = ArrayList<IntArray>()
             val pOffs = ArrayList<IntArray>()
             val pWins = ArrayList<IntArray>()
+            val pRawWins = ArrayList<IntArray>()
+            val pSeed = ArrayList<Int>()
             val pRoute = ArrayList<String>()
             val rawTransfers = ArrayList<IntArray>()
 
@@ -123,20 +133,11 @@ class TransitData(
                         // 탐색 때 계산하지 않고 여기서 굽는 이유는 시간축을 뒤집어도
                         // 같은 시간표를 보게 하기 위해서다.
                         val ph = phaseOf(trip)
-                        val win = IntArray(w.size)
-                        var k = 0
-                        while (k < w.size) {
-                            val head = w[k + 2]
-                            val start = w[k] + Math.floorMod(ph, head)
-                            win[k] = start
-                            // 마지막으로 실제 출발하는 시각까지만 창으로 둔다.
-                            // 뒤집을 때 그 값이 그대로 시작점이 된다.
-                            win[k + 1] = if (w[k + 1] < start) start
-                            else start + ((w[k + 1] - start) / head) * head
-                            win[k + 2] = head
-                            k += 3
-                        }
-                        pWins += win
+                        // 마지막으로 실제 출발하는 시각까지만 창으로 둔다.
+                        // 뒤집을 때 그 값이 그대로 시작점이 된다. (bake 를 볼 것)
+                        pWins += bake(IntArray(w.size) { w[it] }, ph)
+                        pRawWins += IntArray(w.size) { w[it] }
+                        pSeed += ph
                         pRoute += tripRoute[trip] ?: ""
                     }
 
@@ -173,7 +174,29 @@ class TransitData(
                 patternsAtStop = Array(n) { atStop[it].toIntArray() },
                 transfers = Array(n) { trAcc[it].toIntArray() },
                 patternRoute = pRoute.toTypedArray(),
+                patternRawWindows = pRawWins.toTypedArray(),
+                patternPhaseSeed = pSeed.toIntArray(),
             )
+        }
+
+        /**
+         * 원본 창 `(start, end, headway)` 에 위상 [ph] 를 굽는다.
+         *
+         * [load] 안에 있던 계산과 같은 것을 [rephase] 도 쓰려고 꺼냈다.
+         */
+        internal fun bake(w: IntArray, ph: Int): IntArray {
+            val out = IntArray(w.size)
+            var k = 0
+            while (k < w.size) {
+                val head = w[k + 2]
+                val start = w[k] + Math.floorMod(ph, head)
+                out[k] = start
+                out[k + 1] = if (w[k + 1] < start) start
+                else start + ((w[k + 1] - start) / head) * head
+                out[k + 2] = head
+                k += 3
+            }
+            return out
         }
 
         /**
@@ -230,8 +253,21 @@ class TransitData(
      * 거리는 직선 × [DETOUR] 로 본다. 짧은 거리(400m 이하)라 도로가 굽을 여지가
      * 적고, 이 값은 카카오 대조에서 잰 것이다. 한강·고속도로를 사이에 둔 쌍은
      * 이 근사가 낙관적인데, 그건 도보 그래프를 붙일 때 고친다.
+     *
+     * ⚠️ **[maxPerStop] 은 성능 상한이지 모델이 아니다.** 처음엔 8 이었는데
+     * 재본 적이 없었다. 400m 안에 이웃이 8개를 넘는 정류장이 **전체의 약 60%**
+     * 라(중앙 11 · 90% 24 · 최대 59) 밀집지역에서 300m 떨어진 쓸모있는 정류장이
+     * 통째로 잘리고 있었다.
+     *
+     * 8 → 64 로 올려 배치를 다시 돌려보니 (출발지 8곳 · 도착 08:00 표본):
+     * **도달 쌍의 7.24% 가 빨라졌고**(중앙 −2분 · 90% −7분 · 최대 −21분)
+     * 새로 닿는 동네가 32곳 생겼다. 느려지거나 잃은 건 0 이다 —
+     * 환승을 더 주는 것은 완화(relaxation)라 답이 나빠질 수 없다.
+     *
+     * 64 는 최대 이웃 수(59)보다 커서 **사실상 무제한**이다. 대가는 배치
+     * 191초 → 214초(+12%) 뿐이다.
      */
-    fun linkNearbyStops(maxMeters: Double = 400.0, walkMps: Double = 1.1, maxPerStop: Int = 8): Int {
+    fun linkNearbyStops(maxMeters: Double = 400.0, walkMps: Double = 1.1, maxPerStop: Int = 64): Int {
         val cell = maxMeters / 111_000.0          // 위도 1도 ≈ 111km
         val grid = HashMap<Long, MutableList<Int>>(stopCount)
         for (i in 0 until stopCount) {
@@ -278,6 +314,39 @@ class TransitData(
      * * offset' = offLast − offset (거꾸로)
      * * 기준시각' = −(기준시각 + offLast) — 집합이 그대로 등차수열이라 창으로 표현된다
      */
+    /**
+     * 배차 위상만 다시 칠한 사본.
+     *
+     * **왜 필요한가.** 우리는 시간표가 없고 배차만 안다. 그래서 "몇 시 몇 분에 오는
+     * 차인지"를 `trip_id` 해시로 정하는데, 그건 **한 표본을 뽑은 것**이지 참값이 아니다.
+     * 배차 45분 노선이면 그 한 번의 해시가 도달시간을 최대 45분 움직인다.
+     *
+     * 실측(소금 6개, 강남 도착 08:00): 동네 도달시간의 표본 간 폭이 중앙 6분 ·
+     * 90% 14분 · 최대 39분. 45분 예산에서 후보 298곳 중 **모든 표본에 드는 건
+     * 196곳(66%)** 뿐이었다. 즉 답의 1/3이 해시가 정하고 있었다.
+     *
+     * 여러 소금으로 돌려 **중앙값**을 쓰면 그게 없어진다. 큰 배열(정류장·패턴·정차·
+     * 환승)은 전부 공유하고 창만 새로 만든다 — 패턴 14,875개짜리라 사본이 400KB 다.
+     */
+    fun rephase(salt: Int): TransitData {
+        val raw = patternRawWindows ?: return this
+        val seed = patternPhaseSeed ?: return this
+        val nw = Array(patternCount) { p ->
+            // 소금을 씨앗에 섞는다. 곱하고 흩뜨려야 배차와 소금이 공명하지 않는다.
+            var h = seed[p] * 31 + salt
+            h = h xor (h ushr 13)
+            h *= 0x5bd1e995
+            h = h xor (h ushr 15)
+            bake(raw[p], h and 0x3FFFFFF)
+        }
+        return TransitData(
+            stopIds, stopNames, stopLat, stopLon,
+            patternStops, patternOffsets, nw,
+            patternsAtStop, transfers, patternRoute,
+            raw, seed,
+        )
+    }
+
     fun mirrored(): TransitData {
         val n = patternCount
         val ms = Array(n) { p -> patternStops[p].reversedArray() }

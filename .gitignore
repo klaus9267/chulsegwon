@@ -30,6 +30,9 @@ data/raw/bus/
 data/raw/bus-test/
 data/raw/seoul-bus/
 data/raw/seoul/
+# GBIS 엑셀 (2026-09-09). 17MB 이고 월 1회 갱신되며 신청 없이 언제든 받을 수 있다.
+# 받는 곳은 data/raw/SOURCE.md, 여기서 JSONL 을 만드는 건 tools/gbis_village.py.
+data/raw/gbis/
 data/raw/bus-collect.log
 data/logs/
 data/out/verify/
@@ -37,3 +40,7 @@ data/out/verify/
 # 파이썬 캐시
 __pycache__/
 *.pyc
+
+# OTP2 대조 오라클용 JAR (178MB). Maven Central 에서 언제든 받는다:
+# repo1.maven.org/maven2/org/opentripplanner/otp/2.6.0/otp-2.6.0-shaded.jar
+tools/otp/

@@ -121,7 +121,7 @@ object SubwayGtfs {
                         for (p in Headways.WEEKDAY) {
                             val hw = (p.headwaySec * multiplier).toInt().coerceAtLeast(60)
                             freqs.append(tripId).append(',').append(hms(p.startSec)).append(',')
-                                .append(hms(p.endSec)).append(',').append(hw).append(",0\n")
+                                .append(hms(p.endSec)).append(',').append(hw).append(",1\n")
                             freqRows++
                         }
                         trips++

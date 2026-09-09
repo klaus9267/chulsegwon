@@ -4,8 +4,28 @@ export interface FieldPoint {
   lon: number;
 }
 
-/** 보행속도 4.5km/h. 직선거리 기준이라 실제 도보망보다 낙관적이다. */
-const WALK_MPS = 1.25;
+/**
+ * 보행속도. **배치와 같은 값이어야 한다** (`DongMatrix.WALK_MPS`).
+ *
+ * 예전엔 1.25 였다. 배치는 1.1m/s 로 도보망 위를 걷는데 화면은 1.25m/s 로 직선을
+ * 그어서, 같은 "도보 15분"이 배치에선 990m 이고 화면에선 1,125m 였다 — 면적 1.29배.
+ * 한 화면 안에 도보 모델이 두 개 섞여 있었던 것이다.
+ */
+const WALK_MPS = 1.1;
+
+/**
+ * 보간 커널 반경(m). **도보 슬라이더와 무관하다.**
+ *
+ * 예전엔 이 반경이 도보 슬라이더 값이었다. 그래서 슬라이더가 제품 조작인 동시에
+ * 보간 커널이 되어, 5분으로 내리면 동네의 80%가 이웃과 안 겹쳐 섬이 되고 등시선이
+ * 부서졌다. 0분이면 화면이 백지가 됐다.
+ *
+ * 이제 슬라이더는 행렬의 **이탈 도보 평면**을 걸러 진짜 필터로 동작하고
+ * (`ReachabilitySet.within` 을 볼 것), 이 값은 순수하게 "표본 1,768개를 면으로
+ * 잇는 반경"이다. 배치의 이탈 도보 예산(15분 × 1.1m/s = 990m)과 같게 뒀다 —
+ * 그보다 넓히면 계산한 적 없는 곳까지 칠하게 된다.
+ */
+const KERNEL_M = 990;
 
 /**
  * 도달 못 하는 칸의 값 — **예산에 비례해서** 잡는다.
@@ -24,7 +44,6 @@ export function unreachableValue(budgetMinutes: number): number {
 
 export interface FieldOptions {
   budgetMinutes: number;
-  walkCapMinutes: number;
   /** 목표 칸 크기(m). 칸 수가 너무 많아지면 자동으로 키운다. */
   cellMeters: number;
   /** 이 칸 수를 넘지 않게 해상도를 낮춘다. 등시선 추출이 칸 수에 비례해 느려진다. */
@@ -69,7 +88,7 @@ export function buildField(
   if (within.length === 0) return null;
 
   const maxCells = opts.maxCells ?? 160_000;
-  const padMeters = Math.max(opts.walkCapMinutes, 1) * 60 * WALK_MPS;
+  const padMeters = KERNEL_M;
 
   const lats = within.map(([i]) => stations[i].lat);
   const lons = within.map(([i]) => stations[i].lon);
@@ -102,9 +121,9 @@ export function buildField(
 
   for (const [stationIndex, minutes] of within) {
     const st = stations[stationIndex];
-    const allowance = Math.min(opts.budgetMinutes - minutes, opts.walkCapMinutes);
-    if (allowance < 0) continue;
-    const radius = allowance * 60 * WALK_MPS;
+    // 예산까지 남은 시간만큼만 뻗는다. 커널 반경이 상한이다.
+    const radius = Math.min((opts.budgetMinutes - minutes) * 60 * WALK_MPS, KERNEL_M);
+    if (radius <= 0) continue;
 
     const cr = Math.ceil(radius / cellMeters) + 1;
     const r0 = Math.round((st.lat - minLat) / dLat);

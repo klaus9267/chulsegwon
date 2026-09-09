@@ -1,5 +1,3 @@
-import type { Field } from "./grid";
-
 /** 전용면적으로 나눈 방 종류. 실거래가에 방 개수가 없어 면적이 유일한 단서다. */
 export type RoomType = "ONE" | "TWO" | "THREE";
 /** 전세냐 월세냐. 자취는 월세가 실제 기준이라 기본값이 월세다. */
@@ -88,9 +86,79 @@ export const FLAT_CLIMB_M = 10;
  * 단지와 같은 이유로 폴리곤 내부 판정을 하지 않는다. 등시선을 뽑기 전의 스칼라
  * 필드를 그대로 찍으면 O(1) 이다.
  */
-export function filterDongs(all: Dong[], field: Field, f: DongFilter): DongPick[] {
+/**
+ * 좌표 → 가장 가까운 동네 색인.
+ *
+ * **왜 필요한가.** 행렬은 동네까지만 안다. 건물 62,243동에는 동 코드가 없고 좌표뿐이라,
+ * 건물의 도달시간을 알려면 어떤 동네의 값을 쓸지 정해야 한다. 예전엔 등시선 필드를
+ * 찍었는데 그 필드가 뭉개진 그림이었다([filterDongs] 의 주석을 볼 것).
+ *
+ * **한계를 분명히 해둔다.** 동네 중심점은 지오코딩된 점 하나고 경계 폴리곤이 없다.
+ * 그래서 큰 면(양평·가평은 수십 km²)의 가장자리 건물은 이웃 동네 중심이 더 가까울 수
+ * 있다. 그래도 **뭉갠 필드를 찍는 것보다는 낫다** — 적어도 그 값은 어떤 실제 동네의
+ * 실제 계산값이다. 건물은 확대했을 때만 보이는 보조 자료라 이 정도로 둔다.
+ */
+export function buildNearestDong(all: Dong[]): (lat: number, lon: number) => number {
+  // 위도 0.02° ≈ 2.2km. 동네 중심 사이 거리가 중앙 1.4km 라 한 칸에 한둘씩 들어간다.
+  const CELL = 0.02;
+  const grid = new Map<string, number[]>();
+  const key = (r: number, c: number) => r + ":" + c;
+  for (let i = 0; i < all.length; i++) {
+    const k = key(Math.floor(all[i].lat / CELL), Math.floor(all[i].lon / CELL));
+    const bucket = grid.get(k);
+    if (bucket) bucket.push(i);
+    else grid.set(k, [i]);
+  }
+  return (lat, lon) => {
+    const r0 = Math.floor(lat / CELL);
+    const c0 = Math.floor(lon / CELL);
+    let best = -1;
+    let bestD = Infinity;
+    // 한 칸 반경으로 시작해 후보가 나올 때까지 넓힌다. 섬이나 외곽에서도 답이 나온다.
+    for (let ring = 1; ring <= 8 && best < 0; ring++) {
+      for (let dr = -ring; dr <= ring; dr++) {
+        for (let dc = -ring; dc <= ring; dc++) {
+          const bucket = grid.get(key(r0 + dr, c0 + dc));
+          if (!bucket) continue;
+          for (const i of bucket) {
+            const dy = all[i].lat - lat;
+            const dx = (all[i].lon - lon) * 0.79; // cos(37.5°)
+            const d = dy * dy + dx * dx;
+            if (d < bestD) { bestD = d; best = i; }
+          }
+        }
+      }
+    }
+    return best;
+  };
+}
+
+/**
+ * 도달권 안 + 조건에 맞는 동네.
+ *
+ * ⚠️ **[minutes] 는 행렬에서 온 값이어야 한다. 등시선 필드를 찍어 오면 안 된다.**
+ *
+ * 예전엔 `field: Field` 를 받아 `field.values[row*cols+col]` 을 찍었다. 행렬에는
+ * 동네마다 정확한 값이 이미 있는데, 그걸 도보 원으로 부풀려 6회 스무딩한 **그림에서
+ * 되읽고** 있었던 것이다. 스무딩이 "도달불가" 표식(예산×1.4)을 이웃으로 끌어다
+ * 평균내기 때문에, 이웃과 원이 안 겹치는 동네는 값이 밀려 올라가 사라졌다.
+ *
+ * 실측(강남 도착 08:00 · 예산 40분 · 도보 15분): 행렬이 예산 안이라고 한 동네
+ * **162곳 중 78곳(48%)이 목록에서 사라졌고**, 살아남은 것도 중앙 +4.9분 부풀려졌다.
+ * 도보 슬라이더를 5분으로 내리면 76%, 0분이면 100%가 사라졌다 — 슬라이더가
+ * 제품 조작인 동시에 보간 커널 반경이었기 때문이다.
+ *
+ * 그림은 그림대로 두고, **답은 행렬에서 읽는다.** 그래서 필드가 어떻게 생겼든
+ * 목록·순위·헤드라인 숫자는 영향을 안 받는다.
+ */
+export function filterDongs(
+  all: Dong[],
+  minutes: ReadonlyMap<number, number>,
+  f: DongFilter,
+): DongPick[] {
   const out: DongPick[] = [];
-  for (const d of all) {
+  for (let i = 0; i < all.length; i++) {
+    const d = all[i];
     const s = d.rooms[f.room];
     if (!s || s.n < MIN_SAMPLES) continue;
     // 고도를 모르는 동네는 조건을 걸었을 때 통과시키지 않는다. 편의시설과 같은 이유로,
@@ -113,13 +181,12 @@ export function filterDongs(all: Dong[], field: Field, f: DongFilter): DongPick[
       if (value > f.cap) continue;
     }
 
-    const col = Math.round((d.lon - field.minLon) / field.dLon);
-    const row = Math.round((d.lat - field.minLat) / field.dLat);
-    if (col < 0 || col >= field.cols || row < 0 || row >= field.rows) continue;
-    const minutes = field.values[row * field.cols + col];
-    if (minutes > f.budgetMinutes) continue;
+    // 행렬 열 색인 = 이 배열의 색인이다. `dongs.json` 과 `manifest.dongs` 가
+    // 같은 순서로 만들어진다(DongMatrix 가 dongs.json 을 그대로 읽어 쓴다).
+    const m = minutes.get(i);
+    if (m === undefined || m > f.budgetMinutes) continue;
 
-    out.push({ d, minutes, deposit, monthly, n: s.n });
+    out.push({ d, minutes: m, deposit, monthly, n: s.n });
   }
   // 거래가 많은 동이 위에 오도록. 화면에 다 못 그릴 때 먼저 살아남아야 하는 쪽이다.
   return out.sort((a, b) => b.n - a.n);

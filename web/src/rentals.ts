@@ -1,4 +1,3 @@
-import type { Field } from "./grid";
 import type { RoomType, Tenure } from "./dongs";
 
 /**
@@ -61,11 +60,12 @@ export interface RentalPick {
  */
 export function filterRentals(
   all: Rental[],
-  field: Field,
+  minutesOf: (r: Rental, index: number) => number | undefined,
   opts: { room: RoomType; tenure: Tenure; cap: number; budgetMinutes: number },
 ): RentalPick[] {
   const out: RentalPick[] = [];
-  for (const r of all) {
+  for (let i = 0; i < all.length; i++) {
+    const r = all[i];
     // 고른 방 종류의 거래가 없는 건물은 답이 아니다. 다른 구간 값을 대신 보여주면
     // "원룸 찾는데 왜 이 값이지"가 된다.
     const bucket = r.rooms?.[opts.room];
@@ -74,11 +74,8 @@ export function filterRentals(
     if (value === null || value === undefined) continue;
     if (opts.cap > 0 && value > opts.cap) continue;
 
-    const col = Math.round((r.lon - field.minLon) / field.dLon);
-    const row = Math.round((r.lat - field.minLat) / field.dLat);
-    if (col < 0 || col >= field.cols || row < 0 || row >= field.rows) continue;
-    const minutes = field.values[row * field.cols + col];
-    if (minutes > opts.budgetMinutes) continue;
+    const minutes = minutesOf(r, i);
+    if (minutes === undefined || minutes > opts.budgetMinutes) continue;
 
     out.push({ r, minutes, value, n: bucket.n });
   }

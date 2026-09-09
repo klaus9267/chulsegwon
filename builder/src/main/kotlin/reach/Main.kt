@@ -95,7 +95,17 @@ fun main(args: Array<String>) {
         println("      ${cap}분 안에 닿는 정류장 ${"%,d".format(reach)} / ${"%,d".format(data.stopCount)}")
         // 이름이 아니라 **좌표**로 확인한다. 이름 앞자리로 고르면 엉뚱한 동네의
         // 같은 이름 정류장이 잡혀 "안산 42분" 같은 값이 나온다.
-        val probes = listOf(
+        // --to "이름@위도,경도;이름@위도,경도" 로 직접 찍을 수 있다. 카카오·네이버
+        // 길찾기와 맞대볼 때 쓴다 — 붙박이 표본은 서울 도심 편향이라 마을버스가
+        // 실제로 쓰이는 자리를 안 건드린다.
+        val custom = (opts["--to"] ?: "").split(';').mapNotNull { spec ->
+            val at = spec.indexOf('@')
+            if (at <= 0) return@mapNotNull null
+            val ll = spec.substring(at + 1).split(',')
+            if (ll.size != 2) return@mapNotNull null
+            Triple(spec.substring(0, at), ll[0].trim().toDouble(), ll[1].trim().toDouble())
+        }
+        val probes = if (custom.isNotEmpty()) custom else listOf(
             Triple("홍대입구", 37.5572, 126.9245), Triple("잠실", 37.5133, 127.1001),
             Triple("수원역", 37.2659, 127.0001), Triple("의정부역", 37.7383, 127.0470),
             Triple("판교역", 37.3948, 127.1112), Triple("일산 대화", 37.6763, 126.7476),
@@ -115,6 +125,25 @@ fun main(args: Array<String>) {
         return
     }
 
+    if (opts["--mode"] == "oracle") {
+        Oracle.run(
+            File(opts["--subway"] ?: "data/out/gtfs-subway.zip"),
+            File(opts["--bus"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            opts["--from"] ?: "강남",
+            opts["--at"] ?: "08:00",
+            File(opts["--out"] ?: "data/out/verify/oracle.csv"),
+        )
+        return
+    }
+
+    if (opts["--mode"] == "gtfsexpand") {
+        GtfsExpand.run(
+            File(opts["--in"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
+            File(opts["--out"] ?: "data/out/gtfs-expanded.zip"),
+        )
+        return
+    }
+
     if (opts["--mode"] == "gtfscheck") {
         GtfsCheck.run(File(opts["--in"] ?: "data/out/gtfs-seoul-gyeonggi.zip"))
         return
@@ -124,6 +153,7 @@ fun main(args: Array<String>) {
         Gtfs.export(
             gyeonggiDir = File(opts["--gyeonggi"] ?: "data/raw/bus"),
             seoulDir = File(opts["--seoul"] ?: "data/raw/seoul-bus"),
+            villageDir = File(opts["--village"] ?: "data/raw/gbis"),
             outFile = File(opts["--out"] ?: "data/out/gtfs-seoul-gyeonggi.zip"),
             calibrationFile = File(opts["--calibration"] ?: "data/calibration.json"),
         )
@@ -230,6 +260,12 @@ fun main(args: Array<String>) {
     val chains = network.lineSequences()
     println("      노선 ${chains.size}개, 체인 ${chains.values.sumOf { it.size }}개")
 
+    // 감도 스윕용. 평상시엔 안 준다.
+    opts["--rounds"]?.toIntOrNull()?.let {
+        Raptor.MAX_ROUNDS = it
+        println("      ⚠️ 승차 상한을 ${it} 로 바꿔 돈다 (감도 측정)")
+    }
+
     if (opts["--mode"] == "dongmatrix") {
         DongMatrix.build(
             network = network,
@@ -239,6 +275,10 @@ fun main(args: Array<String>) {
             outDir = File(opts["--out"] ?: "data/out/reach2"),
             capMinutes = (opts["--cap"] ?: "120").toInt(),
             walkGraph = File(opts["--walkgraph"] ?: "data/raw/osm/walk-graph.bin"),
+            // 배차 위상을 몇 번 뽑아 중앙값을 쓸지. 1 이면 예전과 같다.
+            // 4 면 표본 6개 기준 중앙값과 90%가 2분 이내로 붙는다(실측).
+            phases = (opts["--phases"] ?: "4").toInt(),
+            maxPerStop = (opts["--maxperstop"] ?: "64").toInt(),
         )
         return
     }

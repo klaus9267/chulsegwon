@@ -51,8 +51,58 @@ class WalkGraph private constructor(
         for ((k, v) in tmp) grid[k] = v.toIntArray()
     }
 
-    /** [lat],[lon] 에서 가장 가까운 도보망 노드. [maxM] 안에 없으면 -1. */
-    fun nearest(lat: Double, lon: Double, maxM: Double = 400.0): Int {
+    /**
+      * 노드가 속한 연결 성분의 크기. 처음 물어볼 때 한 번 계산한다.
+      *
+      * **왜 필요한가.** 육교나 지하도가 OSM 에서 주변 길과 안 이어져 있으면
+      * 노드 몇 개짜리 **섬**이 된다. 정류장이 거기 붙으면 어디로도 못 가서
+      * 그 정류장이 통째로 사라진다. 검증에서 그런 정류장이 434개 나왔다.
+      */
+    private var compSize: IntArray? = null
+
+    private fun components(): IntArray {
+        compSize?.let { return it }
+        val comp = IntArray(nodeCount) { -1 }
+        val size = ArrayList<Int>(1 shl 16)
+        var stack = IntArray(1 shl 16)
+        for (s in 0 until nodeCount) {
+            if (comp[s] >= 0) continue
+            val id = size.size
+            var top = 0
+            var st = stack
+            st[top++] = s
+            comp[s] = id
+            var n = 0
+            while (top > 0) {
+                val u = st[--top]
+                n++
+                var k = degree[u]
+                while (k < degree[u + 1]) {
+                    val v = edgeTo[k]
+                    if (comp[v] < 0) {
+                        comp[v] = id
+                        if (top == st.size) st = st.copyOf(st.size * 2)
+                        st[top++] = v
+                    }
+                    k++
+                }
+            }
+            stack = st
+            size += n
+        }
+        val out = IntArray(nodeCount) { size[comp[it]] }
+        compSize = out
+        return out
+    }
+
+    /**
+     * [lat],[lon] 에서 가장 가까운 도보망 노드. [maxM] 안에 없으면 -1.
+     *
+     * [minComponent] 보다 작은 섬에 있는 노드는 건너뛴다 — 거기 붙으면 어디로도
+     * 못 간다. 0 이면 검사하지 않는다.
+     */
+    fun nearest(lat: Double, lon: Double, maxM: Double = 400.0, minComponent: Int = 0): Int {
+        val comp = if (minComponent > 1) components() else null
         val r = Math.ceil(maxM / (cell * 111_000)).toInt().coerceAtLeast(1)
         val gy = Math.floor(lat / cell).toLong()
         val gx = Math.floor(lon / cell).toLong()
@@ -61,6 +111,7 @@ class WalkGraph private constructor(
         for (dy in -r..r) for (dx in -r..r) {
             val arr = grid[((gy + dy) shl 32) xor (gx + dx)] ?: continue
             for (i in arr) {
+                if (comp != null && comp[i] < minComponent) continue
                 val d = Geo.haversineMeters(lat, lon, ys[i].toDouble(), xs[i].toDouble())
                 if (d < bestD) { bestD = d; best = i }
             }

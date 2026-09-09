@@ -24,14 +24,56 @@ import java.io.File
  */
 object DongMatrix {
 
-    /** 걸어서 정류장까지 갈 수 있다고 보는 최대 거리(m). */
-    private const val ACCESS_M = 800.0
+    /**
+     * 걸어서 정류장까지 갈 수 있다고 보는 **시간**(초).
+     *
+     * ⚠️ 예전엔 거리(800m)로 잡았는데, 그러면 **모델을 바꿀 때 예산이 조용히 바뀐다.**
+     * 직선거리 모델에서 800m 는 ×1.4 를 곱해 도보 1,120m 즉 17분이었는데,
+     * 도보망 모델에서 800m 는 그냥 12분이다. 도보망을 붙이면서 도보 예산이 5분
+     * 줄었고, "도보망 때문에 멀어졌다"고 나온 값에 그 몫이 섞여 있었다.
+     *
+     * 사용자가 고르는 것도 거리가 아니라 시간이다(화면의 도보 상한 슬라이더).
+     * 그래서 시간으로 잡고 모델마다 거리로 환산한다.
+     */
+    private const val ACCESS_SEC = 900          // 15분
     private const val WALK_MPS = 1.1
 
     /** 직선거리를 도보거리로 보정. 카카오 대조에서 잰 값(1.07)보다 크게 잡는다 — 보행은 더 굽는다. */
     private const val WALK_DETOUR = 1.4
 
+    /** 도보망을 쓸 때의 반경(m). 시간 예산을 거리로 환산한 것. */
+    private const val ACCESS_WALK_M = ACCESS_SEC * WALK_MPS
+
+    /** 직선거리로 떨어질 때의 반경(m). 같은 시간 예산이 되도록 우회계수로 나눈다. */
+    private const val ACCESS_STRAIGHT_M = ACCESS_SEC * WALK_MPS / WALK_DETOUR
+
     private class Dong(val name: String, val gu: String, val lat: Double, val lon: Double)
+
+    /**
+     * 위상 소금. 고정값이라 같은 입력이면 같은 결과가 나온다 —
+     * 배포 파일의 내용 해시가 흔들리면 안 되기 때문이다.
+     */
+    private val SALTS = intArrayOf(0, 1_190_311, 51_147_071, 987_654_321,
+        12_345_701, 777_767_777, 424_242_469, 160_481_183)
+
+    /**
+     * [n] 개 표본을 소요시간 순으로 정렬하고 중앙값 자리를 돌려준다.
+     *
+     * **[walk] 를 같이 옮긴다.** 표본마다 최선인 정류장이 다를 수 있어서, 도보는
+     * 그 표본의 소요시간과 짝이다. 따로 정렬하면 엉뚱한 짝이 남는다.
+     *
+     * 짝수 개면 아래쪽(작은 쪽)을 고른다 — 두 값을 평균내면 도보 짝을 못 고른다.
+     */
+    private fun medianIndex(sec: IntArray, walk: IntArray, n: Int): Int {
+        // n 이 8 이하라 삽입정렬이 가장 빠르다. 동네 1,768 × 슬롯 20 × 출발지 621 번 돈다.
+        for (i in 1 until n) {
+            val v = sec[i]; val w = walk[i]
+            var j = i - 1
+            while (j >= 0 && sec[j] > v) { sec[j + 1] = sec[j]; walk[j + 1] = walk[j]; j-- }
+            sec[j + 1] = v; walk[j + 1] = w
+        }
+        return (n - 1) / 2
+    }
 
     /**
      * 한 지점에서 걸어 닿는 정류장들.
@@ -54,7 +96,7 @@ object DongMatrix {
             if (g != null) {
                 for (i in 0 until d.stopCount) {
                     if (d.stopLat[i] == 0.0) continue
-                    val n = g.nearest(d.stopLat[i], d.stopLon[i], SNAP_M)
+                    val n = g.nearest(d.stopLat[i], d.stopLon[i], SNAP_M, MIN_COMPONENT)
                     if (n < 0) continue
                     stopNode[i] = n
                     stopSnap[i] = Geo.haversineMeters(
@@ -66,10 +108,11 @@ object DongMatrix {
         }
 
         /** (정류장, 도보초) 쌍의 평탄 배열. */
-        fun from(lat: Double, lon: Double, maxM: Double): IntArray {
+        fun from(lat: Double, lon: Double): IntArray {
             if (g != null) {
-                val start = g.nearest(lat, lon, SNAP_M)
+                val start = g.nearest(lat, lon, SNAP_M, MIN_COMPONENT)
                 if (start >= 0) {
+                    val maxM = ACCESS_WALK_M
                     val base = Geo.haversineMeters(lat, lon, g.latOf(start), g.lonOf(start))
                     val best = HashMap<Int, Double>(64)
                     g.reachable(start, maxM - base) { node, meters ->
@@ -90,16 +133,19 @@ object DongMatrix {
                     }
                 }
             }
-            return straight(lat, lon, maxM)
+            fellBack++
+            return straight(lat, lon)
         }
 
+        var fellBack = 0; private set
+
         /** 도보망이 없거나 그 지점이 도보망에서 떨어져 있을 때. */
-        private fun straight(lat: Double, lon: Double, maxM: Double): IntArray {
+        private fun straight(lat: Double, lon: Double): IntArray {
             val out = ArrayList<Int>(32)
             for (i in 0 until d.stopCount) {
                 if (d.stopLat[i] == 0.0) continue
                 val m = Geo.haversineMeters(lat, lon, d.stopLat[i], d.stopLon[i])
-                if (m > maxM) continue
+                if (m > ACCESS_STRAIGHT_M) continue
                 out += i
                 out += ((m * WALK_DETOUR) / WALK_MPS).toInt().coerceAtLeast(10)
             }
@@ -110,6 +156,16 @@ object DongMatrix {
     /** 지점·정류장을 도보망에 붙일 때 허용하는 최대 거리(m). */
     private const val SNAP_M = 300.0
 
+    /**
+     * 이보다 작은 연결 성분에는 붙이지 않는다.
+     *
+     * 육교·지하도가 주변 길과 안 이어진 채 OSM 에 들어가 있으면 노드 몇 개짜리 섬이
+     * 된다. 정류장이 거기 붙으면 어디로도 못 가서 그 정류장이 통째로 사라진다.
+     * 검증에서 그런 정류장이 434개 나왔다. 걸어서 15분이면 노드 수백 개는 지나므로
+     * 200 은 넉넉히 안전한 문턱이다.
+     */
+    private const val MIN_COMPONENT = 200
+
     fun build(
         network: Network,
         subwayGtfs: File,
@@ -118,6 +174,12 @@ object DongMatrix {
         outDir: File,
         capMinutes: Int,
         walkGraph: File? = null,
+        phases: Int = 1,
+        /**
+         * 정류장당 도보 환승 이웃 상한. 성능 상한이지 모델이 아니다 —
+         * 자세한 근거는 [TransitData.linkNearbyStops] 를 볼 것.
+         */
+        maxPerStop: Int = 64,
     ) {
         val t0 = System.currentTimeMillis()
         val walk = walkGraph?.takeIf { it.exists() }?.let {
@@ -127,7 +189,7 @@ object DongMatrix {
         }
         if (walk == null) println("      ⚠️ 도보망이 없다 — 접근·이탈을 직선거리로 잡는다")
         val data = TransitData.load(subwayGtfs, busGtfs)
-        val links = data.linkNearbyStops()
+        val links = data.linkNearbyStops(maxPerStop = maxPerStop)
         println("      ${data.describe()} · 도보 환승 ${"%,d".format(links)}개 추가")
 
         val dongs = readDongs(dongsJson)
@@ -136,18 +198,22 @@ object DongMatrix {
         val access = WalkAccess(walk, data)
         if (walk != null) {
             println("      정류장 ${"%,d".format(access.snapped)}/${"%,d".format(data.stopCount)}" +
-                " 개를 도보망에 붙였다 (${SNAP_M.toInt()}m 안)")
+                " 개를 도보망에 붙였다 (${SNAP_M.toInt()}m 안, 끊긴 섬 제외)")
         }
 
         // 동네마다 걸어서 닿는 정류장. 이게 이탈(egress) 도보다.
-        val nearStops = Array(dongs.size) { access.from(dongs[it].lat, dongs[it].lon, ACCESS_M) }
+        val nearStops = Array(dongs.size) { access.from(dongs[it].lat, dongs[it].lon) }
         val orphan = nearStops.count { it.isEmpty() }
-        println("      동네당 ${ACCESS_M.toInt()}m 안 정류장 중앙 " +
+        println("      동네당 도보 ${ACCESS_SEC / 60}분 안 정류장 중앙 " +
             "${nearStops.map { it.size / 2 }.sorted()[nearStops.size / 2]}개" +
             if (orphan > 0) " · 정류장이 없는 동네 ${orphan}개" else "")
 
         // 출발지: 역 621개. 역 주변 정류장도 같이 태운다(버스로 갈아탈 수 있으니).
-        val originSeeds = network.stations.map { st -> access.from(st.lat, st.lon, ACCESS_M) }
+        val originSeeds = network.stations.map { st -> access.from(st.lat, st.lon) }
+        // 도보망에 못 붙어 직선거리로 떨어진 지점이 몇 개인지 밝힌다. 한 파일 안에
+        // 두 모델이 섞이면 결과를 해석할 수 없으니, 최소한 얼마나 섞였는지는 알아야 한다.
+        println("      직선거리로 떨어진 지점 ${access.fellBack}" +
+            "/${dongs.size + network.stations.size}")
         println("      출발지 ${network.stations.size}개 · 역당 승차 후보 중앙 " +
             "${originSeeds.map { it.size / 2 }.sorted()[originSeeds.size / 2]}개")
 
@@ -155,48 +221,85 @@ object DongMatrix {
         println("      슬롯 ${slots.size}개 (도착 ${slots.count { it.direction == Direction.ARRIVE_BY }}" +
             " · 출발 ${slots.count { it.direction == Direction.DEPART_AT }})")
 
-        val forward = data
-        val backward = data.mirrored()
-        val fw = Raptor(forward)
-        val bw = Raptor(backward)
+        // 배차 위상을 여러 번 뽑아 **중앙값**을 쓴다.
+        //
+        // 우리는 시간표가 없고 배차만 안다. 위상(= 몇 시 몇 분에 오는 차인지)을
+        // `trip_id` 해시로 정하는데, 그건 한 표본이지 참값이 아니다. 소금 6개로
+        // 실측해보니 동네 도달시간의 표본 간 폭이 중앙 6분 · 90% 14분 · 최대 39분이고,
+        // 강남 45분 예산에서 후보 298곳 중 모든 표본에 드는 건 196곳(66%)뿐이었다.
+        // **답의 1/3을 해시가 정하고 있었다.**
+        //
+        // 표본 4개면 6개 기준 중앙값과 90%가 2분 이내로 붙는다(실측). 그 이상은
+        // 배치 시간만 늘고 값이 거의 안 움직인다.
+        val k = phases.coerceAtLeast(1)
+        val fws = Array(k) { Raptor(if (it == 0) data else data.rephase(SALTS[it])) }
+        val bws = Array(k) { Raptor((if (it == 0) data else data.rephase(SALTS[it])).mirrored()) }
+        if (k > 1) println("      배차 위상 ${k}회 뽑아 중앙값 사용")
 
         outDir.mkdirs()
         val matrixDir = File(outDir, "matrix")
         matrixDir.mkdirs()
 
         var done = 0
+        // 표본별 (총소요초, 그중 이탈도보초). 동네 하나를 K번 재고 중앙값을 고른다.
+        val sampleSec = IntArray(k)
+        val sampleWalk = IntArray(k)
         for ((oi, seeds) in originSeeds.withIndex()) {
             val rows = Array(slots.size) { ByteArray(dongs.size) }
+            val walkRows = Array(slots.size) { ByteArray(dongs.size) }
             for ((si, slot) in slots.withIndex()) {
                 val arriveBy = slot.direction == Direction.ARRIVE_BY
                 val t = if (arriveBy) -slot.secondsOfDay else slot.secondsOfDay
                 val origins = HashMap<Int, Int>(seeds.size / 2)
-                var k = 0
-                while (k < seeds.size) {
-                    val s = seeds[k]; val w = seeds[k + 1]
+                var q = 0
+                while (q < seeds.size) {
+                    val s = seeds[q]; val w = seeds[q + 1]
                     val v = t + w
                     if (v < (origins[s] ?: Int.MAX_VALUE)) origins[s] = v
-                    k += 2
+                    q += 2
                 }
-                val best = (if (arriveBy) bw else fw).run(origins, t + capMinutes * 60)
+                val bests = Array(k) { pi ->
+                    (if (arriveBy) bws[pi] else fws[pi]).run(origins, t + capMinutes * 60)
+                }
                 val row = rows[si]
+                val walkRow = walkRows[si]
                 for (di in dongs.indices) {
                     val near = nearStops[di]
-                    var bestSec = Raptor.INF
-                    var j = 0
-                    while (j < near.size) {
-                        val a = best[near[j]]
-                        if (a < Raptor.INF) {
-                            val v = a + near[j + 1]
-                            if (v < bestSec) bestSec = v
+                    var got = 0
+                    for (pi in 0 until k) {
+                        val best = bests[pi]
+                        var bestSec = Raptor.INF
+                        var bestWalk = 0
+                        var j = 0
+                        while (j < near.size) {
+                            val a = best[near[j]]
+                            if (a < Raptor.INF) {
+                                val v = a + near[j + 1]
+                                // 같은 동네라도 표본마다 **다른 정류장**이 최선일 수 있다.
+                                // 그래서 도보도 그 표본의 최선과 짝지어 기록한다.
+                                if (v < bestSec) { bestSec = v; bestWalk = near[j + 1] }
+                            }
+                            j += 2
                         }
-                        j += 2
+                        if (bestSec < Raptor.INF) {
+                            sampleSec[got] = bestSec - t
+                            sampleWalk[got] = bestWalk
+                            got++
+                        }
                     }
-                    row[di] = if (bestSec >= Raptor.INF) MatrixWriter.UNREACHABLE_MINUTES.toByte()
-                    else MatrixWriter.toMinuteByte(bestSec - t, capMinutes)
+                    // 표본 절반 이상이 못 닿으면 도달 불가로 본다. 한 표본만 운 좋게
+                    // 닿은 걸 "간다"고 말하면 그게 바로 지금 고치려는 문제다.
+                    if (got * 2 <= k) {
+                        row[di] = MatrixWriter.UNREACHABLE_MINUTES.toByte()
+                        walkRow[di] = 0
+                        continue
+                    }
+                    val mid = medianIndex(sampleSec, sampleWalk, got)
+                    row[di] = MatrixWriter.toMinuteByte(sampleSec[mid], capMinutes)
+                    walkRow[di] = ((sampleWalk[mid] + 30) / 60).coerceIn(0, 254).toByte()
                 }
             }
-            MatrixWriter.write(File(matrixDir, "$oi.bin"), slots, dongs.size, rows)
+            MatrixWriter.write(File(matrixDir, "$oi.bin"), slots, dongs.size, rows, walkRows)
             if (++done % 50 == 0) {
                 println("      $done/${originSeeds.size}  (${(System.currentTimeMillis() - t0) / 1000}초)")
             }

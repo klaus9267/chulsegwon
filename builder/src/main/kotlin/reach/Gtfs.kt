@@ -424,6 +424,21 @@ object Gtfs {
             return byBucket[b].takeIf { it > 0 }
         }
 
+        /**
+         * 유형별 곡선. 어떤 유형이 어떤 속도를 배웠는지 눈으로 본다.
+         *
+         * 이게 필요해진 이유: 경기 마을버스를 넣고 카카오와 대보니 노선 소요시간이
+         * 50~70% 길게 나왔다. 유형 이름표 하나가 어떤 곡선을 끌어오는지 안 보이면
+         * 그런 걸 못 찾는다.
+         */
+        fun describeTypes(): List<String> = byTypeBucket.entries.map { (t, c) ->
+            "        %-14s %s".format(t, edges.indices.joinToString(" ") { i ->
+                val lo = if (i == 0) 0 else edges[i - 1]
+                (if (lo >= 1000) "${lo / 1000}km" else "${lo}m") + ":" +
+                    (if (c[i] > 0) "${c[i].toInt()}" else "\u00b7")
+            })
+        }
+
         fun describe(): String = edges.indices.joinToString(" ") { i ->
             val lo = if (i == 0) 0 else edges[i - 1]
             val v = byBucket[i]
@@ -433,7 +448,10 @@ object Gtfs {
 
     // ── 진입점 ───────────────────────────────────────────────────
 
-    fun export(gyeonggiDir: File, seoulDir: File, outFile: File, calibrationFile: File) {
+    fun export(
+        gyeonggiDir: File, seoulDir: File, villageDir: File,
+        outFile: File, calibrationFile: File,
+    ) {
         val cal = loadCalibration(calibrationFile)
         println("      보정: 정류장 통과 ${cal.dwellSec}초 · 구간거리 서울 ×${"%.3f".format(cal.detour)}" +
             " 경기 ×${"%.3f".format(cal.detourGyeonggi)}" +
@@ -450,9 +468,18 @@ object Gtfs {
         // 순서가 중요하다. 경기 노선 정보를 먼저 알아야 서울 목록에서 어떤 게
         // 중복인지 판단할 수 있고, 그 판단이 나와야 경기 정류장열을 건너뛸 수 있다.
         loadGyeonggiRoutes(gyeonggiDir, mapper, routes)
+        // 경기 마을버스. TAGO 는 경기 마을버스를 한 대도 안 주고(인천은 13개를 준다),
+        // GBIS 엑셀에만 있다. id·좌표·정류장 순서가 TAGO 와 같은 자료로 확인돼서
+        // 같은 로더를 디렉터리만 바꿔 부른다 — tools/gbis_village.py 를 볼 것.
+        val villageBefore = routes.size
+        loadGyeonggiRoutes(villageDir, mapper, routes)
+        if (routes.size > villageBefore) {
+            println("      경기 마을버스 ${"%,d".format(routes.size - villageBefore)}개 (GBIS)")
+        }
         val handover = seoulRoutes(seoulDir, mapper, routes)
         loadSeoulStops(seoulDir, mapper, stops, routes, trips, handover)
         loadGyeonggiStops(gyeonggiDir, mapper, stops, routes, trips, handover.values.toHashSet())
+        loadGyeonggiStops(villageDir, mapper, stops, routes, trips, handover.values.toHashSet())
 
         println("      정류장 ${"%,d".format(stops.size)} · 노선 ${"%,d".format(routes.size)}" +
             " · 운행 ${"%,d".format(trips.size)}")
@@ -461,6 +488,7 @@ object Gtfs {
         // 노선을 다 읽은 뒤에 만든다.
         val model = SpeedModel(speed.observations { rid -> routes["S$rid"]?.type })
         println("      속도 곡선(구간길이:km/h) ${model.describe()}")
+        model.describeTypes().forEach { println(it) }
         write(outFile, stops, routes, trips, speed, model, cal)
     }
 
@@ -532,7 +560,9 @@ object Gtfs {
         stops: MutableMap<String, Stop>, routes: MutableMap<String, Route>,
         trips: MutableList<Trip>, handover: Map<String, String>,
     ) {
-        for (row in readAll(File(dir, "route-stops.jsonl"), mapper)) {
+        val sf = File(dir, "route-stops.jsonl")
+        if (!sf.exists()) return
+        for (row in readAll(sf, mapper)) {
             val src = row["id"] as? String ?: continue
             val id = handover[src] ?: "S$src"
             val route = routes[id] ?: continue
@@ -593,7 +623,7 @@ object Gtfs {
         dir: File, mapper: ObjectMapper, routes: MutableMap<String, Route>,
     ) {
         val rf = File(dir, "routes.jsonl")
-        if (!rf.exists()) { println("      경기 데이터 없음 — 건너뜀"); return }
+        if (!rf.exists()) { println("      ${dir.name} 데이터 없음 — 건너뜀"); return }
 
         val detail = readAll(File(dir, "route-detail.jsonl"), mapper).associateBy { it["id"] as String }
         for (r in readAll(rf, mapper)) {
@@ -826,10 +856,15 @@ object Gtfs {
                         used += t.stops[k]
                     }
                     if (order < 2) skinny++
-                    // exact_times=0 : 시각표가 아니라 "이 간격으로 다닌다"는 뜻
+                    // **exact_times=1.** "이 창 안에서 start 부터 headway 마다 정확히
+                    // 출발한다"는 뜻이다. 0 은 "이 간격으로 다니지만 시각은 모른다"인데,
+                    // 그러면 표준 소비자(OTP 등)가 승차마다 배차 전체를 슬랙으로 얹는다.
+                    // 우리 RAPTOR 는 `start + k×headway` 로 정확히 푸므로(위상을 창에
+                    // 구워둔다) 1 이 우리가 실제로 뜻하는 바다. 0 은 자기 자신에 대한
+                    // 거짓말이었고, 그 상태로는 어떤 바깥 엔진과도 대조가 안 된다.
                     freqs.append(tripId).append(',').append(hm(r.first)).append(',')
                         .append(hmAfter(r.last, r.first)).append(',')
-                        .append(sv.second * 60).append(",0\n")
+                        .append(sv.second * 60).append(",1\n")
                 }
             }
 

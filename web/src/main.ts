@@ -11,7 +11,7 @@ import type { AmenityMap } from "./amenities";
 import { copyText, decodeState, encodeState } from "./share";
 import {
   FLAT_CLIMB_M, ROOM_LABEL, TREND_MONTHS,
-  buildDongGeoJSON, dongKey, filterDongs, loadDongs,
+  buildDongGeoJSON, buildNearestDong, dongKey, filterDongs, loadDongs,
 } from "./dongs";
 import { priceLabel } from "./dongs";
 import type { Dong, DongPick, RoomStat, RoomType, Tenure } from "./dongs";
@@ -233,6 +233,11 @@ async function main() {
   const dongByKey = new Map<string, Dong>();
   /** 마지막 계산에서 각 동까지 걸린 시간. 상세 카드가 다시 계산할 이유가 없다. */
   let dongMinutes = new Map<string, number>();
+  /**
+   * 건물 → 가장 가까운 동네 색인. 좌표만으로 정해지므로 한 번만 계산한다.
+   * 행렬이 동네까지만 알기 때문에 필요하다 — dongs.ts 의 buildNearestDong 을 볼 것.
+   */
+  let rentalDong: Int32Array | null = null;
   void loadDongs(import.meta.env.BASE_URL + "data/").then((list) => {
     dongs = list;
     for (const d of list) dongByKey.set(dongKey(d), d);
@@ -981,7 +986,9 @@ async function main() {
 
     const t0 = performance.now();
     const set = await provider.reachability(state.origin, slot.index);
-    let within = set.within(state.budget);
+    // 도보 슬라이더는 이제 **행렬의 이탈 도보 평면**을 거른다. 예전엔 이 값이
+    // 등시선 보간 커널의 반경이어서, 줄이면 답이 사라졌다(그림이 답을 정했다).
+    let within = set.within(state.budget, state.walkCap);
 
     // 맞벌이: 두 직장 모두에서 예산 안에 드는 역만 남긴다.
     // 각 역의 값은 둘 중 **더 오래 걸리는 쪽**이다. 두 사람 다 그 시간 안에
@@ -993,6 +1000,10 @@ async function main() {
       for (const [i] of within) {
         const b = set2.minutesTo(i);
         if (b === null) continue;
+        // 두 번째 직장에서도 도보 상한을 지켜야 한다. 같은 동네라도 출발지가
+        // 다르면 내리는 정류장이 달라서 이탈 도보가 다르다.
+        const bw = set2.walkTo(i);
+        if (bw !== null && bw > state.walkCap) continue;
         const a = set.minutesTo(i);
         if (a === null) continue;
         const worst = Math.max(a, b);
@@ -1001,11 +1012,16 @@ async function main() {
       within = both;
     }
 
-    // 도착 축이 동네다. 예전엔 역 621개를 부풀려 등시선을 그렸는데, 지금은
-    // 동네 1,768개가 각자 정확한 값을 갖고 있어 그걸 그대로 칠한다.
+    // **답은 여기서 나온다. 아래 필드는 그림일 뿐이다.**
+    //
+    // 예전엔 목록·순위·헤드라인 숫자를 전부 등시선 필드에서 되읽었다. 행렬에
+    // 정확한 값이 있는데 그걸 도보 원으로 부풀려 6회 스무딩한 그림에서 다시 꺼낸
+    // 것이라, 예산 안 동네의 48%가 목록에서 사라지고 남은 것도 +4.9분 부풀려졌다.
+    // 도보 슬라이더를 0분으로 두면 100% 사라졌다.
+    const minutesByIndex = new Map(within);
+
     const field = buildField(meta.dongs, within, {
       budgetMinutes: state.budget,
-      walkCapMinutes: state.walkCap,
       cellMeters: CELL_METERS,
     });
     lastField = field;
@@ -1020,9 +1036,18 @@ async function main() {
     map.setBands(bands, RAMP, state.budget);
     map.setStations(buildStationGeoJSON(meta.stations, state.origin));
 
-    // 도달권 안 + 예산 이내. 폴리곤 검사 없이 스칼라 필드를 찍어보면 O(1) 이다.
-    const buildings = field
-      ? filterRentals(rentals, field, {
+    // 건물은 행렬에 없다(동네까지만 있다). 가장 가까운 동네의 값을 쓴다.
+    // 배정은 좌표만으로 정해지므로 한 번만 계산해 재사용한다.
+    if (rentalDong === null && rentals.length > 0 && dongs.length > 0) {
+      const nearest = buildNearestDong(dongs);
+      rentalDong = new Int32Array(rentals.length);
+      for (let i = 0; i < rentals.length; i++) {
+        rentalDong[i] = nearest(rentals[i].lat, rentals[i].lon);
+      }
+    }
+    const rd = rentalDong;
+    const buildings = rd
+      ? filterRentals(rentals, (_r, i) => minutesByIndex.get(rd[i]), {
           room: state.room,
           tenure: state.tenure,
           cap: state.cap,
@@ -1031,17 +1056,13 @@ async function main() {
       : [];
     map.setComplexes(buildRentalGeoJSON(buildings, state.tenure));
 
-    const dongPicks = (
-      field
-        ? filterDongs(dongs, field, {
-            room: state.room,
-            tenure: state.tenure,
-            budgetMinutes: state.budget,
-            cap: state.cap,
-            flatOnly: state.flatOnly,
-          })
-        : []
-    ).filter((p) => passes(amenityData[dongKey(p.d)], state.amenities, amenityTh));
+    const dongPicks = filterDongs(dongs, minutesByIndex, {
+      room: state.room,
+      tenure: state.tenure,
+      budgetMinutes: state.budget,
+      cap: state.cap,
+      flatOnly: state.flatOnly,
+    }).filter((p) => passes(amenityData[dongKey(p.d)], state.amenities, amenityTh));
     map.setDongs(buildDongGeoJSON(dongPicks, state.tenure));
     dongMinutes = new Map(dongPicks.map((p) => [dongKey(p.d), Math.round(p.minutes)]));
     renderCompare();
