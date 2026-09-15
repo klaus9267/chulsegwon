@@ -51,10 +51,7 @@ CODE_PATHS = ['builder/src', 'web/src', 'web/index.html']
 
 
 def say(msg):
-    # 배치는 Windows PowerShell 5.1 이라 파이썬 출력이 CP949 로 넘어간다. em dash(—)는
-    # CP949 에 없어서 **print 에서 UnicodeEncodeError 로 죽는다** — Git Bash 에서 시험할 땐
-    # PYTHONIOENCODING=utf-8 을 붙여서 안 보였다. 로그용 문자로 바꿔 쓴다.
-    print(msg.replace('—', '-'), flush=True)
+    print(msg, flush=True)
 
 
 def run(cmd, check=True, timeout=None):
@@ -255,10 +252,14 @@ def main():
 
 
 if __name__ == '__main__':
-    # 그래도 못 찍는 글자가 남으면 죽지 말고 ? 로 찍는다. 공개 여부가 로그 글자 하나에 걸리면 안 된다.
+    # **UTF-8 로 찍는다.** 출력이 파이프로 넘어가면 파이썬은 로캘 인코딩(CP949)을 쓰는데,
+    # collect.ps1 은 [Console]::OutputEncoding 을 UTF-8 로 두고 읽는다. 그래서 첫 자동 공개
+    # (09-15 22:32) 로그의 한글이 전부 깨졌다. 예전엔 CP949 에 없는 em dash 로 print 가 죽어서
+    # 그 글자만 바꿔 넣었는데, 원인은 글자가 아니라 인코딩 불일치였다. gtfs_match.py 와 같게 맞춘다.
+    # errors='replace' 는 남긴다 — 공개 여부가 로그 글자 하나에 걸리면 안 된다.
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(errors='replace')
+            stream.reconfigure(encoding='utf-8', errors='replace')
         except (AttributeError, ValueError):
             pass
     try:

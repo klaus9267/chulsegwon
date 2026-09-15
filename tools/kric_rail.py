@@ -101,4 +101,6 @@ def main():
 
 
 if __name__ == '__main__':
+    # collect.ps1 이 UTF-8 로 읽는다. 파이프 출력의 기본값(CP949)으로 두면 로그 한글이 깨진다.
+    sys.stdout.reconfigure(encoding='utf-8')
     main()
