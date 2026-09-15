@@ -239,6 +239,21 @@ $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}' -f `
 Add-Content -Path $metrics -Value $row -Encoding UTF8
 Say "지표: $row"
 
+# 7) 공개 — 데이터 자산을 바꾸고 사이트를 다시 배포한다. **사람 확인 없이 나간다.**
+#
+#    T-03 에서 정했다(2026-09-15): 사이드 프로젝트라 사용자가 없고, 로컬에서 만든 결과가
+#    며칠씩 공개 안 되는 쪽(09-06 ~ 09-15 에 실제로 그랬다)이 더 나쁘다.
+#    대신 tools/publish.py 가 깨진 걸 못 내보내게 막는다 —
+#      · 데이터가 온전할 때만 (행렬 수 · 동네 수 · 매니페스트가 맨 나중에 써졌는가)
+#      · 그 데이터를 만든 코드가 origin/main 과 같을 때만 (아니면 옛 웹이 새 데이터를 받아 깨진다)
+#      · 바뀌었을 때만, 그리고 배포가 성공했을 때만 "올렸다"고 기록
+#    공개가 실패해도 여기는 맨 끝이라 지표는 이미 남아 있다.
+Say '▶ 공개'
+$t0 = Get-Date
+& python (Join-Path $root 'tools\publish.py') 2>&1 |
+    Where-Object { $_.ToString().Trim() } | ForEach-Object { Say ("   " + $_.ToString().Trim()) }
+Say ("◀ 공개  {0:n0}초" -f ((Get-Date) - $t0).TotalSeconds)
+
 # 로그가 무한정 쌓이지 않게 30일치만 남긴다
 Get-ChildItem $logDir -Filter 'collect-*.log' |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } |

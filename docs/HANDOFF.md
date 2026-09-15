@@ -41,7 +41,7 @@
 | 수집 자동화 | ✅ 하루 5회 — 수집 → GTFS → 검사 → 불변식 → 카카오 보정 → 행렬 |
 | 동네 시세 | ✅ 전월세 실거래 329,847건 → 법정동 1,768개 방 종류별 |
 | 개별 건물 · 편의시설 · 지형 · 시세 추이 · 동네 비교 · 공유 미리보기 | ✅ |
-| 배포 | ✅ GitHub Pages · 09-15 공개본 `ec3ac7b` (역 657 · 동네 1,768). 데이터 자산 올리기는 아직 수동 ([T-03](TASKS.md#t-03)) |
+| 배포 | ✅ GitHub Pages · 09-15 공개본 `ec3ac7b` (역 657 · 동네 1,768). **자동 공개** — 배치가 새 행렬을 검사해 자산 교체·재배포 (`tools/publish.py`) |
 | 테스트 | ❌ 회귀 테스트 0건 ([T-06](TASKS.md#t-06)) |
 
 ```
@@ -281,6 +281,9 @@ gh release upload data-latest chulsegwon-data.tgz --clobber
 > - `tar` 가 `C:/...` 를 **원격 호스트 `C`** 로 읽는다. `--force-local` 을 주거나 `/c/...` 경로를 쓴다
 > - `npm run build -- --base=/chulsegwon/` 을 치면 MSYS 가 경로로 알고 `/Program Files/Git/chulsegwon/`
 >   으로 바꿔버린다. 로컬에서 배포판을 흉내 낼 때는 `MSYS_NO_PATHCONV=1` 을 앞에 붙인다(CI 는 리눅스라 무관)
+>
+> **09-15 부터 이 절차는 배치가 한다** — `tools/publish.py`([T-03](TASKS.md#완료)). 사람이 할 일은
+> 없고, 급하게 손으로 내보낼 때만 `python tools/publish.py --force`.
 >
 > 로컬에서 배포판 그대로 띄워보려면 `vite preview --base=/chulsegwon/ --port 5173`.
 > **포트는 5173 이어야 한다** — 카카오맵은 등록된 도메인·포트만 받고, 다른 포트에서는 에러 없이
