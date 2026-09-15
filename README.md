@@ -196,6 +196,7 @@ cd web && npm install && npm run dev
 | [docs/TASKS.md](docs/TASKS.md) | **열린 과제** — 우선순위와 완료 조건 |
 | [docs/HISTORY.md](docs/HISTORY.md) | 무엇을 언제 했는지 — 흐름과 숫자 |
 | [docs/STACK.md](docs/STACK.md) | 기술 선택의 이유 — 쓴 것과 **쓰지 않은 것** |
+| [docs/ENGINES.md](docs/ENGINES.md) | 등시선을 만들 수 있는 남의 엔진·API 조사 — 왜 우리 걸 계속 쓰는지 |
 | [docs/PRODUCT.md](docs/PRODUCT.md) | 제품 기획 — 타겟, 경쟁 서비스와의 자리, 로드맵 |
 
 ## 출처·라이선스
