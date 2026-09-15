@@ -41,7 +41,7 @@
 | 수집 자동화 | ✅ 하루 5회 — 수집 → GTFS → 검사 → 불변식 → 카카오 보정 → 행렬 |
 | 동네 시세 | ✅ 전월세 실거래 329,847건 → 법정동 1,768개 방 종류별 |
 | 개별 건물 · 편의시설 · 지형 · 시세 추이 · 동네 비교 · 공유 미리보기 | ✅ |
-| 배포 | ⚠️ 사이트(`main`)와 데이터 릴리스가 **09-06 에 멈춰 있다** · 로컬 `dev` 41커밋 미푸시 ([T-01](TASKS.md#t-01) · [T-02](TASKS.md#t-02)) |
+| 배포 | ✅ GitHub Pages · 09-15 공개본 `ec3ac7b` (역 657 · 동네 1,768). 데이터 자산 올리기는 아직 수동 ([T-03](TASKS.md#t-03)) |
 | 테스트 | ❌ 회귀 테스트 0건 ([T-06](TASKS.md#t-06)) |
 
 ```
@@ -265,9 +265,26 @@ git 에 없다([ADR-8](#adr-8-생성-데이터는-git-에-넣지-않는다)). �
 **데이터 갱신:**
 
 ```bash
-tar -czf /tmp/data.tgz -C web/public data
-gh release upload data-latest /tmp/data.tgz --clobber
+tar --force-local -czf chulsegwon-data.tgz -C web/public data
+gh release upload data-latest chulsegwon-data.tgz --clobber
 ```
+
+> ⚠️ **2026-09-15 까지 여기 적힌 명령이 틀려 있었다.** `/tmp/data.tgz` 로 올리게 돼 있었는데
+> `gh release upload` 는 **파일 이름을 자산 이름으로 쓴다.** 그러면 `data.tgz` 라는 자산이 하나
+> 더 생길 뿐이고, 워크플로가 받는 `chulsegwon-data.tgz` 는 옛날 그대로 남는다 — 조용히 안 바뀐다.
+>
+> **순서도 지켜야 한다 — 데이터를 먼저, `main` 을 나중에.** 워크플로는 `main` 푸시 때만 돌고
+> 그때 자산을 받는다. 코드를 먼저 올리면 새 코드가 옛 데이터를 받아 사이트가 깨진다
+> (09-15 에는 코드가 동네 1,768축인데 자산은 역 621축이었다).
+>
+> Windows Git Bash 에서 걸리는 것 둘:
+> - `tar` 가 `C:/...` 를 **원격 호스트 `C`** 로 읽는다. `--force-local` 을 주거나 `/c/...` 경로를 쓴다
+> - `npm run build -- --base=/chulsegwon/` 을 치면 MSYS 가 경로로 알고 `/Program Files/Git/chulsegwon/`
+>   으로 바꿔버린다. 로컬에서 배포판을 흉내 낼 때는 `MSYS_NO_PATHCONV=1` 을 앞에 붙인다(CI 는 리눅스라 무관)
+>
+> 로컬에서 배포판 그대로 띄워보려면 `vite preview --base=/chulsegwon/ --port 5173`.
+> **포트는 5173 이어야 한다** — 카카오맵은 등록된 도메인·포트만 받고, 다른 포트에서는 에러 없이
+> "지도를 준비하는 중"에서 멈춘다.
 
 ---
 
