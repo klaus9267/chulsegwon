@@ -218,7 +218,15 @@ export class KakaoAdapter implements MapAdapter {
       adapter.moveHandler?.({ lon: ll.getLng(), lat: ll.getLat() }, adapter.lastScreen);
     });
 
-    ns.maps.event.addListener(map, "dragend", () => {
+    // ⚠️ **끌기가 끝났을 때(dragend)가 아니라 카메라가 멈췄을 때(idle)마다** 다시 뽑는다.
+    //
+    // 라벨은 그 순간 화면 범위 안의 것만 만든다([thin]). 예전엔 dragend 에서만 다시 뽑아서,
+    // **코드가 카메라를 옮기는 경우를 놓쳤다.** 출발지를 운정중앙으로 바꾸면 결과는 강남
+    // 화면에서 그려져 라벨이 거의 안 생기고, 이어서 fitBounds 가 카메라를 옮기는데 줌이
+    // 9→9 로 같으면 zoom_changed 도 안 나서 **라벨 없는 빈 지도**가 남았다(T-20).
+    // 원래는 콤보박스가 easeTo 로 줌을 흔들어 우연히 다시 뽑히곤 했다.
+    // idle 은 끌기·확대·setBounds·panBy 애니메이션이 끝나면 전부 한 번씩 온다.
+    ns.maps.event.addListener(map, "idle", () => {
       adapter.renderDongs();
       adapter.renderBuildings();
     });
