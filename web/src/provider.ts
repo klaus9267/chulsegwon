@@ -57,13 +57,6 @@ export class StationMatrixProvider implements ReachabilityProvider {
       : null;
 
     return {
-      minutesTo(i) {
-        const v = row[i];
-        return v === UNREACHABLE_MINUTES ? null : v;
-      },
-      walkTo(i) {
-        return walkRow ? walkRow[i] : null;
-      },
       within(budget, walkCap) {
         const out: Array<[number, number]> = [];
         for (let i = 0; i < row.length; i++) {

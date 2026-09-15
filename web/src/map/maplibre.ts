@@ -86,7 +86,7 @@ async function loadStyle(): Promise<{ style: maplibregl.StyleSpecification; ok: 
 export class MapLibreAdapter implements MapAdapter {
   readonly name = "CARTO";
 
-  private originMarkers: maplibregl.Marker[] = [];
+  private originMarker: maplibregl.Marker | null = null;
 
   private constructor(
     private readonly map: maplibregl.Map,
@@ -189,11 +189,11 @@ export class MapLibreAdapter implements MapAdapter {
     src?.setData(dongs);
   }
 
-  setOrigins(points: LngLat[]): void {
-    for (const m of this.originMarkers) m.remove();
-    this.originMarkers = points.map((at) =>
-      new maplibregl.Marker({ color: "#e53e3e" }).setLngLat([at.lon, at.lat]).addTo(this.map),
-    );
+  setOrigin(at: LngLat): void {
+    this.originMarker?.remove();
+    this.originMarker = new maplibregl.Marker({ color: "#e53e3e" })
+      .setLngLat([at.lon, at.lat])
+      .addTo(this.map);
   }
 
   fitBounds(bounds: Bounds, padding: Padding): void {

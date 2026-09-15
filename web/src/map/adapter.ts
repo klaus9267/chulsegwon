@@ -34,8 +34,8 @@ export interface MapAdapter {
   setBands(bands: GeoJSON.FeatureCollection, ramp: Ramp, budgetMinutes: number): void;
   /** 도달 역 점. 구현에 따라 생략할 수 있다(카카오는 객체 수가 부담이라 상한을 둔다). */
   setStations(stations: GeoJSON.FeatureCollection): void;
-  /** 출발역 마커들. 맞벌이면 둘이다. */
-  setOrigins(points: LngLat[]): void;
+  /** 출발역 마커. 하나만 둔다 — 부르면 이전 것을 지운다. */
+  setOrigin(at: LngLat): void;
   /** 지정 범위가 다 보이도록. */
   fitBounds(bounds: Bounds, padding: Padding): void;
   /** 한 점으로 부드럽게 이동. */

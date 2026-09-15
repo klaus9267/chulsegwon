@@ -13,7 +13,6 @@ import type { RoomType, Tenure } from "./dongs";
  */
 export interface ShareState {
   origin: string;
-  origin2: string | null;
   direction: "ARRIVE_BY" | "DEPART_AT";
   timeIndex: number;
   budget: number;
@@ -32,7 +31,6 @@ export interface ShareState {
 export function encodeState(s: ShareState): string {
   const p = new URLSearchParams();
   p.set("o", s.origin);
-  if (s.origin2) p.set("o2", s.origin2);
   p.set("d", s.direction === "ARRIVE_BY" ? "a" : "d");
   p.set("t", String(s.timeIndex));
   p.set("b", String(s.budget));
@@ -52,8 +50,7 @@ export function decodeState(hash: string): Partial<ShareState> {
   const out: Partial<ShareState> = {};
   const o = p.get("o");
   if (o) out.origin = o;
-  const o2 = p.get("o2");
-  if (o2) out.origin2 = o2;
+  // `o2`(맞벌이 두 번째 직장)는 09-16 에 기능을 뺐다. 옛 링크에 있어도 첫 직장 기준으로 연다.
   if (p.get("d") === "d") out.direction = "DEPART_AT";
   else if (p.get("d") === "a") out.direction = "ARRIVE_BY";
 

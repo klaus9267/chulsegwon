@@ -45,21 +45,17 @@ export interface Manifest {
  * 개념도 의미를 잃는다 — 역에서 먼 동네도 버스로는 가깝다.
  */
 export interface ReachabilitySet {
-  /** 도착 축 인덱스 -> 소요시간(분). 도달 불가면 null. */
-  minutesTo(index: number): number | null;
-  /**
-   * 그 소요시간 **안에 들어 있는 이탈 도보**(분). 모르면 null.
-   *
-   * 행렬 값은 "역에서 내려 집까지"를 이미 포함한 문앞 시간이다. 화면의 도보 슬라이더가
-   * 뜻을 가지려면 그중 도보가 몇 분인지 알아야 한다. 예전엔 그걸 몰라서 웹이 도보를
-   * 한 번 더 더해 그렸다(이중계상).
-   */
-  walkTo(index: number): number | null;
   /**
    * 예산 안 + 도보 상한 안에 드는 것들. `[인덱스, 소요시간(분)]`
    *
    * [walkCapMinutes] 를 주면 "이탈 도보가 그보다 긴 곳"을 뺀다. 도보 평면이 없는
    * 옛 파일에서는 무시된다.
+   *
+   * 행렬 값은 "역에서 내려 집까지"를 이미 포함한 문앞 시간이고, 도보 평면은 그 안에
+   * 든 이탈 도보(분)다. 예전엔 도보를 몰라서 웹이 한 번 더 더해 그렸다(이중계상).
+   *
+   * 칸 하나씩 읽는 `minutesTo`·`walkTo` 는 맞벌이(두 직장 교집합)만 썼고, 09-16 에
+   * 그 기능을 빼면서 같이 뺐다.
    */
   within(budgetMinutes: number, walkCapMinutes?: number): Array<[number, number]>;
 }

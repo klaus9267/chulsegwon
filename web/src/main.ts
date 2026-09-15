@@ -148,8 +148,6 @@ async function main() {
 
   const state = {
     origin: findStation(meta, "강남") ?? 0,
-    /** 맞벌이용 두 번째 직장. null 이면 한 명 기준. */
-    origin2: null as number | null,
     direction: "ARRIVE_BY" as Direction,
     timeIndex: 19,
     budget: 40,
@@ -293,34 +291,11 @@ async function main() {
       const idx = displayToIndex.get(value);
       if (idx === undefined) return;
       state.origin = idx;
-      showOrigins(idx);
+      showOrigin(idx);
       onInputChanged();
     },
   });
   originInput.value = meta.stations[state.origin].name;
-
-  const origin2Input = $<HTMLInputElement>("origin2");
-  createCombobox({
-    input: origin2Input,
-    toggle: $("origin2Toggle"),
-    list: $("origin2List"),
-    options: comboOptions,
-    onSelect: (value) => {
-      const idx = displayToIndex.get(value);
-      if (idx === undefined) return;
-      state.origin2 = idx;
-      $("origin2Clear").hidden = false;
-      showOrigins();
-      onInputChanged();
-    },
-  });
-  $("origin2Clear").addEventListener("click", () => {
-    state.origin2 = null;
-    origin2Input.value = "";
-    $("origin2Clear").hidden = true;
-    showOrigins();
-    onInputChanged();
-  });
 
   const timeSlider = $<HTMLInputElement>("time");
   // 도착 7개 / 출발 13개로 슬롯 수가 다르다. 부팅 때 한 번만 잡으면
@@ -478,11 +453,11 @@ async function main() {
   map.onStationClick((index) => {
     state.origin = index;
     originInput.value = comboLabelFor(index);
-    showOrigins();
+    showOrigin();
     void render();
   });
 
-  showOrigins();
+  showOrigin();
   // 무엇을 보고 있는지 밝힌다. 시세는 실거래가지 호가가 아니고, 우리는 매물을
   // 갖고 있지 않다. 그 경계를 흐리면 사용자가 없는 방을 찾으러 간다.
   $("warn").textContent =
@@ -497,21 +472,15 @@ async function main() {
   await render();
 
   /**
-   * 고른 역을 마커로 찍는다. [move] 면 카메라도 옮긴다.
-   *
-   * 처음 로드할 때는 옮기지 않는다. 서울 전체가 보이는 초기 뷰를 유지해야
-   * 어디를 보고 있는지 알 수 있다.
-   */
-  /**
-   * 출발역 마커를 다시 찍는다. 맞벌이면 둘이다.
+   * 출발역 마커를 다시 찍는다.
    *
    * [moveTo] 를 주면 그 역으로 카메라도 옮긴다. 처음 로드할 때는 옮기지 않는다 —
    * 서울 전체가 보이는 초기 뷰를 유지해야 어디를 보고 있는지 알 수 있다.
    */
-  function showOrigins(moveTo?: number) {
+  function showOrigin(moveTo?: number) {
     if (!map) return;
-    const idxs = [state.origin, ...(state.origin2 === null ? [] : [state.origin2])];
-    map.setOrigins(idxs.map((i) => ({ lon: meta.stations[i].lon, lat: meta.stations[i].lat })));
+    const st = meta.stations[state.origin];
+    map.setOrigin({ lon: st.lon, lat: st.lat });
     // 출발지가 바뀌면 도달 범위도 달라진다. 다음 계산에서 화면을 다시 맞춰야 한다.
     fitted = false;
     if (moveTo !== undefined) {
@@ -821,12 +790,9 @@ async function main() {
     );
   }
 
-  /** 상세 카드에 쓸 출발지 이름. 맞벌이면 둘 다 적는다. */
+  /** 상세 카드에 쓸 출발지 이름. */
   function originLabel(): string {
-    const a = meta.stations[state.origin].name;
-    return state.origin2 === null
-      ? a + "까지"
-      : a + " · " + meta.stations[state.origin2].name + "까지 각각";
+    return meta.stations[state.origin].name + "까지";
   }
 
   function showDetail(key: string) {
@@ -898,14 +864,6 @@ async function main() {
       const i = byName(q.origin);
       if (i !== null) state.origin = i;
     }
-    if (q.origin2) {
-      const i = byName(q.origin2);
-      if (i !== null) {
-        state.origin2 = i;
-        origin2Input.value = comboLabelFor(i);
-        $("origin2Clear").hidden = false;
-      }
-    }
     if (q.direction) state.direction = q.direction;
     if (q.timeIndex !== undefined) state.timeIndex = q.timeIndex;
     if (q.budget !== undefined) state.budget = q.budget;
@@ -939,7 +897,6 @@ async function main() {
       // 엉뚱한 곳을 연다 — `양평` 이 5호선(서울)과 경의중앙선(양평군)에 하나씩
       // 있고 둘은 53km 떨어져 있다. `resolveOrigin` 이 표시값을 먼저 본다.
       origin: comboLabelFor(state.origin),
-      origin2: state.origin2 === null ? null : comboLabelFor(state.origin2),
       direction: state.direction,
       timeIndex: state.timeIndex,
       budget: state.budget,
@@ -1011,29 +968,7 @@ async function main() {
     const set = await provider.reachability(state.origin, slot.index);
     // 도보 슬라이더는 이제 **행렬의 이탈 도보 평면**을 거른다. 예전엔 이 값이
     // 등시선 보간 커널의 반경이어서, 줄이면 답이 사라졌다(그림이 답을 정했다).
-    let within = set.within(state.budget, state.walkCap);
-
-    // 맞벌이: 두 직장 모두에서 예산 안에 드는 역만 남긴다.
-    // 각 역의 값은 둘 중 **더 오래 걸리는 쪽**이다. 두 사람 다 그 시간 안에
-    // 닿아야 하므로 max 가 맞다. 행렬을 하나 더 읽고 배열을 훑는 게 전부라
-    // 라우팅을 다시 돌리는 것과 비교가 안 되게 싸다.
-    if (state.origin2 !== null) {
-      const set2 = await provider.reachability(state.origin2, slot.index);
-      const both: Array<[number, number]> = [];
-      for (const [i] of within) {
-        const b = set2.minutesTo(i);
-        if (b === null) continue;
-        // 두 번째 직장에서도 도보 상한을 지켜야 한다. 같은 동네라도 출발지가
-        // 다르면 내리는 정류장이 달라서 이탈 도보가 다르다.
-        const bw = set2.walkTo(i);
-        if (bw !== null && bw > state.walkCap) continue;
-        const a = set.minutesTo(i);
-        if (a === null) continue;
-        const worst = Math.max(a, b);
-        if (worst <= state.budget) both.push([i, worst]);
-      }
-      within = both;
-    }
+    const within = set.within(state.budget, state.walkCap);
 
     // **답은 여기서 나온다. 아래 필드는 그림일 뿐이다.**
     //
@@ -1105,10 +1040,7 @@ async function main() {
 
     const ms = Math.round(performance.now() - t0);
     const verb = state.direction === "ARRIVE_BY" ? "까지 도착" : "에 출발";
-    const who =
-      state.origin2 === null
-        ? meta.stations[state.origin].name
-        : meta.stations[state.origin].name + " + " + meta.stations[state.origin2].name;
+    const who = meta.stations[state.origin].name;
     // 헤드라인은 사용자가 방금 한 질문의 답이어야 한다. 조건을 좁히면 이 숫자가
     // 줄어드는 게 보여야 조작에 의미가 생긴다.
     const head =
