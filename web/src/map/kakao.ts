@@ -134,7 +134,7 @@ export class KakaoAdapter implements MapAdapter {
   private stationOverlays: KakaoOverlay[] = [];
   private stationClick: ((index: number) => void) | null = null;
   private complexOverlays: KakaoOverlay[] = [];
-  private originMarkers: KakaoOverlay[] = [];
+  private originMarker: KakaoOverlay | null = null;
 
   /** 컨테이너 크기가 0 이라 미뤄둔 화면 맞추기. 크기가 생기면 실행한다. */
   pendingFit: { bounds: Bounds; padding: Padding } | null = null;
@@ -514,15 +514,13 @@ export class KakaoAdapter implements MapAdapter {
     }
   }
 
-  setOrigins(points: LngLat[]): void {
-    for (const m of this.originMarkers) m.setMap(null);
-    this.originMarkers = points.map((at) => {
-      const m = new this.ns.maps.Marker({
-        position: new this.ns.maps.LatLng(at.lat, at.lon),
-      });
-      m.setMap(this.map);
-      return m;
+  setOrigin(at: LngLat): void {
+    this.originMarker?.setMap(null);
+    const m = new this.ns.maps.Marker({
+      position: new this.ns.maps.LatLng(at.lat, at.lon),
     });
+    m.setMap(this.map);
+    this.originMarker = m;
   }
 
   /**
@@ -566,8 +564,23 @@ export class KakaoAdapter implements MapAdapter {
     if (Math.abs(dx) > 4 || Math.abs(dy) > 4) this.map.panBy(dx, dy);
   }
 
+  /**
+   * ⚠️ **줌은 애니메이션 없이 바꾼다.** 카카오는 확대 애니메이션이 도는 동안 들어온
+   * 카메라 명령을 **소리 없이 버린다** — `panTo`·`setCenter`·`setBounds` 전부.
+   * 그래서 `setLevel(n, {animate:true})` 뒤에 붙인 `panTo` 도, 250ms 뒤 결과가 와서
+   * 부르는 `fitBounds` 도 안 먹고 카메라가 옛 자리에 남았다.
+   *
+   * 지도에 대고 잰 결과(같은 출발 상태에서 반복):
+   * `panTo` 만 ✅ · `setLevel(+1, animate)`+`panTo` ❌ · `setLevel(+1)`+`panTo` ✅ ·
+   * 같은 레벨이면 `animate` 라도 ✅ · 600ms 기다렸다 `panTo` ✅ ·
+   * `panTo` 중에 들어온 `fitBounds` 는 ✅ (**삼키는 건 줌 애니메이션뿐이다**).
+   *
+   * 이 버그는 코드가 아니라 **자료가 바뀔 때** 드러났다. 줌이 그대로면(같은 레벨)
+   * 애니메이션이 없어 멀쩡했는데, 새 행렬로 기본 화면이 한 단계 넓어지면서
+   * 레벨이 실제로 바뀌기 시작했다.
+   */
   easeTo(at: LngLat, zoom: number): void {
-    this.map.setLevel(zoomToLevel(zoom), { animate: true });
+    this.map.setLevel(zoomToLevel(zoom));
     this.map.panTo(new this.ns.maps.LatLng(at.lat, at.lon));
   }
 
