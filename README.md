@@ -174,7 +174,7 @@ cd web && npm install && npm run dev
 
 ## 지금의 한계
 
-정직하게 적는다. 대부분은 데이터의 한계고, 해결 경로는 [docs/HANDOFF.md](docs/HANDOFF.md) §6에 있다.
+정직하게 적는다. 대부분은 데이터의 한계고, 해결할 순서는 [docs/TASKS.md](docs/TASKS.md) 에 있다.
 
 | 항목 | 지금 | 남은 것 |
 |---|---|---|
@@ -193,7 +193,9 @@ cd web && npm install && npm run dev
 
 | | |
 |---|---|
-| [docs/HANDOFF.md](docs/HANDOFF.md) | 설계 결정 18개(ADR)와 근거, 개발하며 만난 난관과 교훈 |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | 설계 결정 40개(ADR)와 근거, 개발하며 만난 난관과 교훈 |
+| [docs/TASKS.md](docs/TASKS.md) | **열린 과제** — 우선순위와 완료 조건 |
+| [docs/HISTORY.md](docs/HISTORY.md) | 무엇을 언제 했는지 — 흐름과 숫자 |
 | [docs/STACK.md](docs/STACK.md) | 기술 선택의 이유 — 쓴 것과 **쓰지 않은 것** |
 | [docs/PRODUCT.md](docs/PRODUCT.md) | 제품 기획 — 타겟, 경쟁 서비스와의 자리, 로드맵 |
 
