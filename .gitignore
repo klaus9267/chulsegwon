@@ -53,3 +53,7 @@ __pycache__/
 # OTP2 대조 오라클용 JAR (178MB). Maven Central 에서 언제든 받는다:
 # repo1.maven.org/maven2/org/opentripplanner/otp/2.6.0/otp-2.6.0-shaded.jar
 tools/otp/
+
+# 카카오 검증 표본 (2026-09-17). 남의 서비스에서 뜬 값이라 저장소에 올리지 않는다.
+# 만드는 건 tools/kakao-collect.mjs, OD 목록은 tools/od-pool.json 에 남긴다.
+data/verify/
